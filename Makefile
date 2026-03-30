@@ -20,14 +20,25 @@ NAME=ejercicio_final.zip
 #   DENIS LOREN MOLDOVAN        - 100522240@ALUMNOS.UC3M.ES #
 #############################################################
 
-.PHONY: all clean export
+.PHONY: all clean export server register msg_csr
 
-all:
+all: server register msg_csr
+
+server: $(BUILD_DIR)/server.o $(BUILD_DIR)/sqlite3.o
+$(BUILD_DIR)/server.o: $(SRC_DIR)/server.c
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -o $@
+
+register: $(BUILD_DIR)/register.o $(BUILD_DIR)/sqlite3.o
+$(BUILD_DIR)/register.o: $(SRC_DIR)/register.c
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -o $@
+
+msg_csr: $(BUILD_DIR)/msg_csr.o
+$(BUILD_DIR)/msg_csr.o: $(SRC_DIR)/msg_csr.c
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -o $@
 
 
 $(BUILD_DIR)/sqlite3.o: $(LIBS_DIR)/sqlite/sqlite3.c
-	$(CC) -fPIC -O3 -c $< -o $@
-
+	$(CC) -O3 -c $< -o $@
 
 
 clean:
