@@ -10,7 +10,6 @@ TEST_DIR=./tests
 INCLUDE_DIRS=-I$(LIBS_DIR) -I$(SRC_DIR)/inc
 
 REPORT_DIR=./report
-BIN_DIR=./bin
 
 NAME=ejercicio_final.zip
 
@@ -46,8 +45,8 @@ $(BUILD_DIR)/test_users: $(SRC_DIR)/test_users.c $(SRC_DIR)/users.c
 
 
 clean:
-	rm -rf $(BUILD_DIR) $(BIN_DIR)
-	mkdir -p $(BUILD_DIR) $(BIN_DIR)
+	rm -rf $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)
 	rm -f $(TEST_DIR)/db.sqlite ./db.sqlite # DB temporal de los tests
 
 export:
