@@ -1,7 +1,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include "inc/users.h"
+
+#include "users.h"
 
 User users[MAX_USERS];
 int nusers = 0;

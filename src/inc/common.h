@@ -2,7 +2,7 @@
 #define COMMON_H
 
 #include <stdint.h>
-#include<pthread.h>
+#include <pthread.h>
 
 #define MAX_USERS 50
 #define MAX_NAME 256

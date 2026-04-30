@@ -4,6 +4,16 @@
 #include <stdint.h>
 #include "common.h"
 
+enum MSG_CODES {
+    REGISTER   = 1,
+    UNREGISTER = 2,
+    CONNECT    = 3,
+    DISCONNECT = 4,
+    SEND       = 5,
+    SENDATTACH = 6,
+    USERS      = 7
+};
+
 int user_find(const char *name);
 int user_add(const char *name);
 int user_remove(const char *name);

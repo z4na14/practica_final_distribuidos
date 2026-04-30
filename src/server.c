@@ -8,8 +8,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include "inc/common.h"
-#include "inc/users.h"
+
+#include "common.h"
+#include "users.h"
 
 static int server_fd = -1;
 
@@ -104,7 +105,7 @@ static void handle_connect(int fd, const char *client_ip) {
             int cfd = connect_to(dest_ip, dest_port);
             if (cfd >= 0) {
                 char id_str[32];
-                snprintf(id_str, seizeof(id_str), "%u", m->id);
+                snprintf(id_str, sizeof(id_str), "%u", m->id);
                 send(cfd, "SEND_MESSAGE", strlen("SEND_MESSAGE") + 1, 0);
                 send(cfd, from_copy, strlen(from_copy) + 1, 0);
                 send(cfd, id_str, strlen(id_str) + 1, 0);

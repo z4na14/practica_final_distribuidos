@@ -19,29 +19,27 @@ NAME=ejercicio_final.zip
 #   DENIS LOREN MOLDOVAN        - 100522240@ALUMNOS.UC3M.ES #
 #############################################################
 
-.PHONY: all clean export server register msg_csr
+.PHONY: all clean export server register msg_csr tests
 
-all: server #register msg_csr
+all: server tests #register msg_csr
+
+sqlite3: $(BUILD_DIR)/sqlite3.o
+$(BUILD_DIR)/sqlite3.o: $(LIBS_DIR)/sqlite/sqlite3.c
+	$(CC) -O3 -c $< -o $@
 
 server: $(BUILD_DIR)/server
 $(BUILD_DIR)/server: $(SRC_DIR)/server.c $(SRC_DIR)/users.c
-	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -lpthread -o $@
-
-#register: $(BUILD_DIR)/register.o $(BUILD_DIR)/sqlite3.o
-#$(BUILD_DIR)/register.o: $(SRC_DIR)/register.c
-#	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -o $@
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread $^ -o $@
 
 #msg_csr: $(BUILD_DIR)/msg_csr.o
 #$(BUILD_DIR)/msg_csr.o: $(SRC_DIR)/msg_csr.c
 #	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -o $@
 
 
-#$(BUILD_DIR)/sqlite3.o: $(LIBS_DIR)/sqlite/sqlite3.c
-#	$(CC) -O3 -c $< -o $@
 
-test: $(BUILD_DIR)/test_users
-$(BUILD_DIR)/test_users: $(SRC_DIR)/test_users.c $(SRC_DIR)/users.c                                                                                       
-	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -lpthread -o $@
+tests: $(BUILD_DIR)/tests
+$(BUILD_DIR)/tests: $(SRC_DIR)/tests.c $(SRC_DIR)/users.c
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread $^ -o $@
 
 
 clean:
