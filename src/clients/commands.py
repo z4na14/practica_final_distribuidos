@@ -31,7 +31,7 @@ class Client:
     def register(self, username: str):
         self.get_connection()
 
-        self.server_socket.send(bytes(f"{1}#{username}", "utf_8"))
+        self.server_socket.send(bytes(f"1#{username}", "utf_8"))
         try:
             response = int(self.server_socket.recv(self.MAX_MSG_SIZE))
             match response:
@@ -42,21 +42,18 @@ class Client:
             print("c> REGISTER FAIL", file=sys.stderr)
 
     def unregister(self, username: str):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(self.TIMEOUT)
-            sock.connect((self.address, self.port))
+        self.get_connection()
 
-            sock.send(bytes(f"{2}#{username}", "utf_8"))
+        self.server_socket.send(bytes(f"2#{username}", "utf_8"))
+        try:
+            response = int(self.server_socket.recv(self.MAX_MSG_SIZE))
+            match response:
+                case 0: print("c> UNREGISTER OK")
+                case 1: print("c> USER DOES NOT EXIST", file=sys.stderr)
+                case _: print("c> UNREGISTER FAIL"    , file=sys.stderr)
 
-            try:
-                response = int(sock.recv(self.MAX_MSG_SIZE))
-                match response:
-                    case 0: print("c> UNREGISTER OK")
-                    case 1: print("c> USER DOES NOT EXIST", file=sys.stderr)
-                    case _: print("c> UNREGISTER FAIL"    , file=sys.stderr)
-
-            except socket.timeout:
-                print("c> UNREGISTER FAIL", file=sys.stderr)
+        except socket.timeout:
+            print("c> UNREGISTER FAIL", file=sys.stderr)
     
     def connect(self, username: str):
         pass
