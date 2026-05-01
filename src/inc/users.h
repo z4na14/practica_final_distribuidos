@@ -5,6 +5,7 @@
 #include "common.h"
 
 enum MSG_CODES {
+    MESSAGE    = 0, // Used just for the answer
     REGISTER   = 1,
     UNREGISTER = 2,
     CONNECT    = 3,
