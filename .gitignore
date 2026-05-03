@@ -1,5 +1,7 @@
 # ##### CUSOTM #####
 .idea
+__pycache__/
+*.pyc
 
 # Prerequisites
 *.d

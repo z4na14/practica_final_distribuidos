@@ -1,144 +1,402 @@
+#include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 #include <pthread.h>
 
+#include "sqlite/sqlite3.h"
 #include "users.h"
+#include "common.h"
 
-User users[MAX_USERS];
-int nusers = 0;
-pthread_mutex_t users_mutex = PTHREAD_MUTEX_INITIALIZER;
+static sqlite3          *db       = NULL;
+static pthread_mutex_t   db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int user_find(const char *name) {
-    // Devuelve el índice del usuario o -1 si no existe
-    for (int i = 0; i < nusers; i++) {
-        if (strcmp(users[i].name, name) == 0) {
-            return i;
-        } 
+int db_init(void) {
+    int rc = sqlite3_open_v2(DB_PATH, &db,
+                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "db_init: %s\n", sqlite3_errmsg(db));
+        return -1;
     }
-    return -1;
+
+    char *errmsg = NULL;
+
+    /* status: 0=desconectado 1=conectado; msg_counter para IDs únicos por usuario */
+    rc = sqlite3_exec(db,
+        "CREATE TABLE IF NOT EXISTS users ("
+        "  name        TEXT    PRIMARY KEY,"
+        "  status      INTEGER NOT NULL DEFAULT 0,"
+        "  ip          TEXT    NOT NULL DEFAULT '',"
+        "  port        INTEGER NOT NULL DEFAULT 0,"
+        "  msg_counter INTEGER NOT NULL DEFAULT 0"
+        ");",
+        NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "db_init (tabla users): %s\n", errmsg);
+        sqlite3_free(errmsg);
+        return -1;
+    }
+
+    rc = sqlite3_exec(db,
+        "CREATE TABLE IF NOT EXISTS messages ("
+        "  id       INTEGER NOT NULL,"
+        "  sender   TEXT    NOT NULL,"
+        "  receiver TEXT    NOT NULL,"
+        "  message  TEXT    NOT NULL"
+        ");",
+        NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "db_init (tabla messages): %s\n", errmsg);
+        sqlite3_free(errmsg);
+        return -1;
+    }
+
+    return 0;
+}
+
+void db_close(void) {
+    if (db) {
+        sqlite3_close_v2(db);
+        db = NULL;
+    }
 }
 
 int user_add(const char *name) {
-    pthread_mutex_lock(&users_mutex);
-    if (user_find(name) != -1) {
-        pthread_mutex_unlock(&users_mutex);
-        return 1;       // Si devuelve 1, el usuario ya existe
+    pthread_mutex_lock(&db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT 1 FROM users WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 2;
     }
-    if (nusers >= MAX_USERS) {
-        pthread_mutex_unlock(&users_mutex);
-        return 2;       // Devuelve 2 en caso de error
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc == SQLITE_ROW) {
+        pthread_mutex_unlock(&db_mutex);
+        return 1; /* ya existe */
     }
 
-    strncpy(users[nusers].name, name, MAX_NAME - 1);
-    users[nusers].connected = 0;
-    users[nusers].ip[0] = '\0';
-    users[nusers].port = 0;
-    users[nusers].pending = NULL;
-    users[nusers].msg_counter = 0;
-    nusers++;
+    rc = sqlite3_prepare_v2(db,
+        "INSERT INTO users (name, status, ip, port, msg_counter) "
+        "VALUES (?, 0, '', 0, 0);",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 2;
+    }
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 
-    pthread_mutex_unlock(&users_mutex);
-    return 0;
+    pthread_mutex_unlock(&db_mutex);
+    return (rc == SQLITE_DONE) ? 0 : 2;
 }
 
 int user_remove(const char *name) {
-    pthread_mutex_lock(&users_mutex);
-    int idx = user_find(name);
-    if (idx == -1) {
-        pthread_mutex_unlock(&users_mutex);
-        return 1;       // Devuelve 1 si no existe el usuario
+    pthread_mutex_lock(&db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT 1 FROM users WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 2;
+    }
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_ROW) {
+        pthread_mutex_unlock(&db_mutex);
+        return 1; /* no existe */
     }
 
-    // Liberar mensajes pendientes
-    Msg *m = users[idx].pending;
-    while(m) {
-        Msg *next = m -> next;
-        free(m);
-        m = next;
+    /* borrar también sus mensajes pendientes */
+    rc = sqlite3_prepare_v2(db,
+        "DELETE FROM messages WHERE receiver = ?;",
+        -1, &stmt, NULL);
+    if (rc == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
     }
-    
-    // Reducir el array de usuarios
-    users[idx] = users[nusers - 1];
-    nusers--;
 
-    pthread_mutex_unlock(&users_mutex);
-    return 0;
+    rc = sqlite3_prepare_v2(db,
+        "DELETE FROM users WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 2;
+    }
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    pthread_mutex_unlock(&db_mutex);
+    return (rc == SQLITE_DONE) ? 0 : 2;
 }
 
 int user_connect(const char *name, const char *ip, uint16_t port) {
-    pthread_mutex_lock(&users_mutex);
-    int idx = user_find(name);
-    if (idx == -1) {
-        pthread_mutex_unlock(&users_mutex);
-        return 1;       // Devuelve 1 si no existe el usuario
+    pthread_mutex_lock(&db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT status FROM users WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 3;
     }
-    if (users[idx].connected) {
-        pthread_mutex_unlock(&users_mutex);
-        return 2;       // Devuelve 2 si el usuario ya está conectado
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&db_mutex);
+        return 1; /* no existe */
+    }
+    int status = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    if (status == 1) {
+        pthread_mutex_unlock(&db_mutex);
+        return 2; /* ya conectado */
     }
 
-    strncpy(users[idx].ip, ip, sizeof(users[idx].ip) - 1);
-    users[idx].port = port;
-    users[idx].connected = 1;
+    rc = sqlite3_prepare_v2(db,
+        "UPDATE users SET status = 1, ip = ?, port = ? WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 3;
+    }
+    sqlite3_bind_text(stmt, 1, ip,   -1, SQLITE_STATIC);
+    sqlite3_bind_int (stmt, 2, (int)port);
+    sqlite3_bind_text(stmt, 3, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 
-    pthread_mutex_unlock(&users_mutex);
-    return 0;
+    pthread_mutex_unlock(&db_mutex);
+    return (rc == SQLITE_DONE) ? 0 : 3;
 }
 
 int user_disconnect(const char *name) {
-    pthread_mutex_lock(&users_mutex);
-    int idx = user_find(name);
+    pthread_mutex_lock(&db_mutex);
 
-    if (idx == -1) {
-        pthread_mutex_unlock(&users_mutex);
-        return 1;           // Devuelve 1 si no existe el usuario
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT status FROM users WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 3;
     }
-    if (!users[idx].connected) {
-        pthread_mutex_unlock(&users_mutex);
-        return 2;           // Devuelve 2 si no está conectado
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&db_mutex);
+        return 1; /* no existe */
+    }
+    int status = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    if (status == 0) {
+        pthread_mutex_unlock(&db_mutex);
+        return 2; /* ya desconectado */
     }
 
-    users[idx].connected = 0;
-    users[idx].ip[0] = '\0';
-    users[idx].port = 0;
+    rc = sqlite3_prepare_v2(db,
+        "UPDATE users SET status = 0, ip = '', port = 0 WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 3;
+    }
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 
-    pthread_mutex_unlock(&users_mutex);
+    pthread_mutex_unlock(&db_mutex);
+    return (rc == SQLITE_DONE) ? 0 : 3;
+}
+
+int user_get_conn_info(const char *name, char *ip, uint16_t *port) {
+    pthread_mutex_lock(&db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT status, ip, port FROM users WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 1;
+    }
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&db_mutex);
+        return 1; /* no existe */
+    }
+
+    int status = sqlite3_column_int(stmt, 0);
+    if (status == 1) {
+        const char *stored_ip   = (const char *)sqlite3_column_text(stmt, 1);
+        int         stored_port = sqlite3_column_int(stmt, 2);
+        if (ip)   { strncpy(ip, stored_ip ? stored_ip : "", 15); ip[15] = '\0'; }
+        if (port) *port = (uint16_t)stored_port;
+    }
+    sqlite3_finalize(stmt);
+
+    pthread_mutex_unlock(&db_mutex);
+    return (status == 1) ? 0 : 2;
+}
+
+int users_get_connected(char (*names)[MAX_NAME], int max) {
+    pthread_mutex_lock(&db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT name FROM users WHERE status = 1;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return -1;
+    }
+
+    int count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max) {
+        const char *n = (const char *)sqlite3_column_text(stmt, 0);
+        if (n) {
+            strncpy(names[count], n, MAX_NAME - 1);
+            names[count][MAX_NAME - 1] = '\0';
+            count++;
+        }
+    }
+    sqlite3_finalize(stmt);
+
+    pthread_mutex_unlock(&db_mutex);
+    return count;
+}
+
+/* El ID se saca del msg_counter del destinatario (nunca es 0, vuelve a 1 al llegar a UINT_MAX).
+ * Devuelve el ID asignado o 0 si el destinatario no existe. */
+unsigned int msg_add(const char *receiver, const char *sender, const char *text) {
+    pthread_mutex_lock(&db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "UPDATE users "
+        "SET msg_counter = CASE WHEN msg_counter >= 4294967295 THEN 1 "
+        "                       ELSE msg_counter + 1 END "
+        "WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 0;
+    }
+    sqlite3_bind_text(stmt, 1, receiver, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    /* sqlite3_changes == 0 significa que no existe el destinatario */
+    if (rc != SQLITE_DONE || sqlite3_changes(db) == 0) {
+        pthread_mutex_unlock(&db_mutex);
+        return 0;
+    }
+
+    rc = sqlite3_prepare_v2(db,
+        "SELECT msg_counter FROM users WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 0;
+    }
+    sqlite3_bind_text(stmt, 1, receiver, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&db_mutex);
+        return 0;
+    }
+    unsigned int new_id = (unsigned int)sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    rc = sqlite3_prepare_v2(db,
+        "INSERT INTO messages (id, sender, receiver, message) "
+        "VALUES (?, ?, ?, ?);",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 0;
+    }
+    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)new_id);
+    sqlite3_bind_text (stmt, 2, sender,   -1, SQLITE_STATIC);
+    sqlite3_bind_text (stmt, 3, receiver, -1, SQLITE_STATIC);
+    sqlite3_bind_text (stmt, 4, text,     -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    pthread_mutex_unlock(&db_mutex);
+    return (rc == SQLITE_DONE) ? new_id : 0;
+}
+
+/* lee el primer mensaje pendiente SIN borrarlo; hay que llamar a msg_delete tras entregarlo */
+int msg_get_next(const char *receiver, unsigned int *id, char *sender, char *text) {
+    pthread_mutex_lock(&db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT id, sender, message FROM messages WHERE receiver = ? LIMIT 1;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, receiver, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&db_mutex);
+        return 1; /* sin mensajes pendientes */
+    }
+
+    *id = (unsigned int)sqlite3_column_int64(stmt, 0);
+
+    const char *s = (const char *)sqlite3_column_text(stmt, 1);
+    const char *m = (const char *)sqlite3_column_text(stmt, 2);
+    if (sender) { strncpy(sender, s ? s : "", MAX_NAME - 1); sender[MAX_NAME - 1] = '\0'; }
+    if (text)   { strncpy(text,   m ? m : "", MAX_MSG   - 1); text[MAX_MSG   - 1]   = '\0'; }
+
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&db_mutex);
     return 0;
 }
 
-unsigned int msg_add(int idx, const char *from, const char *text) {
-    Msg *m = malloc(sizeof(Msg));
-    if (!m) return 0;
+int msg_delete(const char *receiver, unsigned int id) {
+    pthread_mutex_lock(&db_mutex);
 
-    users[idx].msg_counter++;
-    if (users[idx].msg_counter == 0) {
-        users[idx].msg_counter = 1;
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db,
+        "DELETE FROM messages WHERE receiver = ? AND id = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return -1;
     }
+    sqlite3_bind_text (stmt, 1, receiver, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, (sqlite3_int64)id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 
-    m->id = users[idx].msg_counter;
-    strncpy(m->from, from, MAX_NAME -1);
-    strncpy(m->text, text, MAX_MSG - 1);
-    m->next = NULL;
-    
-    if (!users[idx].pending) {
-        users[idx].pending = m;
-    } else {
-        Msg *cur = users[idx].pending;
-        while (cur->next) {
-            cur = cur-> next;
-        }
-        cur->next = m;
-    }
-
-    return m->id;
-}
-
-Msg *msg_pop(int idx) {
-    if (!users[idx].pending) {
-        return NULL;
-    }
-    Msg *m = users[idx].pending;
-    users[idx].pending = m->next;
-    m->next = NULL;
-    return m;
+    pthread_mutex_unlock(&db_mutex);
+    return (rc == SQLITE_DONE) ? 0 : -1;
 }

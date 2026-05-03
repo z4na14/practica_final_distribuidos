@@ -1,17 +1,16 @@
-CC=gcc
-# Para que mas targets, asi se queda lol
-CFLAGS=-g #DEBUG
-#CFLAGS=-Wall -Wextra -Werror -O3 #RELEASE
-BUILD_DIR=./build
-SRC_DIR=./src
-LIBS_DIR=./lib
-TEST_DIR=./tests
+CC       = gcc
+#CFLAGS  = -g                        #DEBUG
+CFLAGS   = -Wall -Wextra -Werror -O3 #RELEASE
+BUILD_DIR = ./build
+SRC_DIR   = ./src
+LIBS_DIR  = ./lib
+TEST_DIR  = ./tests
 
-INCLUDE_DIRS=-I$(LIBS_DIR) -I$(SRC_DIR)/inc
+INCLUDE_DIRS = -I$(LIBS_DIR) -I$(SRC_DIR)/inc
 
-REPORT_DIR=./report
+REPORT_DIR = ./report
 
-NAME=ejercicio_final.zip
+NAME = ejercicio_final.zip
 
 #############################################################
 # AUTHORS                                                   #
@@ -19,33 +18,32 @@ NAME=ejercicio_final.zip
 #   DENIS LOREN MOLDOVAN        - 100522240@ALUMNOS.UC3M.ES #
 #############################################################
 
-.PHONY: all clean export server register msg_csr tests
+.PHONY: all clean export server tests
 
-all: server tests #register msg_csr
+all: server tests
 
-sqlite3: $(BUILD_DIR)/sqlite3.o
-$(BUILD_DIR)/sqlite3.o: $(LIBS_DIR)/sqlite/sqlite3.c
+# Directorio de salida
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+# Compilar sqlite3 sin flags estrictos (no es código nuestro)
+$(BUILD_DIR)/sqlite3.o: $(LIBS_DIR)/sqlite/sqlite3.c | $(BUILD_DIR)
 	$(CC) -O3 -c $< -o $@
 
+# Servidor
 server: $(BUILD_DIR)/server
-$(BUILD_DIR)/server: $(SRC_DIR)/server.c $(SRC_DIR)/users.c
-	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread $^ -o $@
+$(BUILD_DIR)/server: $(SRC_DIR)/server.c $(SRC_DIR)/users.c $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread -ldl $^ -o $@
 
-#msg_csr: $(BUILD_DIR)/msg_csr.o
-#$(BUILD_DIR)/msg_csr.o: $(SRC_DIR)/msg_csr.c
-#	$(CC) $(CFLAGS) $(INCLUDE_DIRS) $^ -o $@
-
-
-
+# Tests
 tests: $(BUILD_DIR)/tests
-$(BUILD_DIR)/tests: $(SRC_DIR)/tests.c $(SRC_DIR)/users.c
-	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread $^ -o $@
-
+$(BUILD_DIR)/tests: $(SRC_DIR)/tests.c $(SRC_DIR)/users.c $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread -ldl $^ -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)
 	mkdir -p $(BUILD_DIR)
-	rm -f $(TEST_DIR)/db.sqlite ./db.sqlite # DB temporal de los tests
+	rm -f $(TEST_DIR)/db.sqlite ./db.sqlite
 
 export:
 	make clean
