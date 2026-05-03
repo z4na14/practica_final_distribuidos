@@ -19,61 +19,9 @@ typedef struct {
     char ip[16];
 } ClientArg;
 
-typedef struct {
-    char name[MAX_NAME];
-    int  fd;  /* -1 = libre */
-} ConnEntry;
-
-static ConnEntry       conn_table[MAX_USERS];
-static pthread_mutex_t conn_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static void conn_table_init(void) {
-    for (int i = 0; i < MAX_USERS; i++)
-        conn_table[i].fd = -1;
-}
-
-static void conn_add(const char *name, int fd) {
-    pthread_mutex_lock(&conn_mutex);
-    for (int i = 0; i < MAX_USERS; i++) {
-        if (conn_table[i].fd == -1) {
-            strncpy(conn_table[i].name, name, MAX_NAME - 1);
-            conn_table[i].name[MAX_NAME - 1] = '\0';
-            conn_table[i].fd = fd;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&conn_mutex);
-}
-
-static void conn_remove(const char *name) {
-    pthread_mutex_lock(&conn_mutex);
-    for (int i = 0; i < MAX_USERS; i++) {
-        if (conn_table[i].fd != -1 &&
-            strcmp(conn_table[i].name, name) == 0) {
-            conn_table[i].fd      = -1;
-            conn_table[i].name[0] = '\0';
-            break;
-        }
-    }
-    pthread_mutex_unlock(&conn_mutex);
-}
-
-/* shutdown en vez de close para que el hilo de CONNECT detecte el cierre
- * y pueda hacer close(fd) él mismo sin double-close */
-static void conn_shutdown(const char *name) {
-    pthread_mutex_lock(&conn_mutex);
-    for (int i = 0; i < MAX_USERS; i++) {
-        if (conn_table[i].fd != -1 &&
-            strcmp(conn_table[i].name, name) == 0) {
-            shutdown(conn_table[i].fd, SHUT_RDWR);
-            conn_table[i].fd      = -1;
-            conn_table[i].name[0] = '\0';
-            break;
-        }
-    }
-    pthread_mutex_unlock(&conn_mutex);
-}
-
+/* * The server must act proactively and open a new socket to the target's
+ * IP and port to deliver messages or ACKs.
+ */
 static int conn_deliver(const char *receiver, const char *sender,
                         unsigned int id, const char *text) {
     char id_str[32];
@@ -85,44 +33,62 @@ static int conn_deliver(const char *receiver, const char *sender,
     if (mlen < 0 || mlen >= (int)sizeof(msg)) return -1;
     msg[mlen] = '\0';
 
-    pthread_mutex_lock(&conn_mutex);
-    int rfd = -1;
-    for (int i = 0; i < MAX_USERS; i++) {
-        if (conn_table[i].fd != -1 &&
-            strcmp(conn_table[i].name, receiver) == 0) {
-            rfd = conn_table[i].fd;
-            break;
-        }
+    char recv_ip[16];
+    uint16_t recv_port;
+    if (user_get_conn_info(receiver, recv_ip, &recv_port) != 0) {
+        return -1; // Receiver is not connected
     }
-    ssize_t sent = (rfd >= 0) ? send(rfd, msg, (size_t)(mlen + 1), 0) : -1;
-    pthread_mutex_unlock(&conn_mutex);
+
+    // 1. Connect to receiver's listening thread
+    int sfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sfd < 0) return -1;
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family      = AF_INET;
+    addr.sin_port        = htons(recv_port);
+    addr.sin_addr.s_addr = inet_addr(recv_ip);
+
+    if (connect(sfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        user_disconnect(receiver); // Drop user if unreachable
+        close(sfd);
+        return -1;
+    }
+
+    ssize_t sent = send(sfd, msg, (size_t)(mlen + 1), 0);
+    close(sfd);
 
     if (sent <= 0) {
-        /* socket roto: limpiar estado del receiver */
-        if (rfd >= 0) {
-            user_disconnect(receiver);
-            conn_remove(receiver);
-        }
+        user_disconnect(receiver);
         return -1;
     }
 
     printf("s> SEND MESSAGE %u FROM %s TO %s\n", id, sender, receiver);
     msg_delete(receiver, id);
 
-    /* ack al remitente si también está conectado */
+    // 2. Send ACK to the sender's listening thread if they are connected
     char ack[64];
     int  alen = snprintf(ack, sizeof(ack), "SEND_MESS_ACK#%s", id_str);
     if (alen > 0 && alen < (int)sizeof(ack)) {
         ack[alen] = '\0';
-        pthread_mutex_lock(&conn_mutex);
-        for (int i = 0; i < MAX_USERS; i++) {
-            if (conn_table[i].fd != -1 &&
-                strcmp(conn_table[i].name, sender) == 0) {
-                (void)send(conn_table[i].fd, ack, (size_t)(alen + 1), 0);
-                break;
+
+        char sender_ip[16];
+        uint16_t sender_port;
+        if (user_get_conn_info(sender, sender_ip, &sender_port) == 0) {
+            int ack_fd = socket(AF_INET, SOCK_STREAM, 0);
+            if (ack_fd >= 0) {
+                struct sockaddr_in saddr;
+                memset(&saddr, 0, sizeof(saddr));
+                saddr.sin_family      = AF_INET;
+                saddr.sin_port        = htons(sender_port);
+                saddr.sin_addr.s_addr = inet_addr(sender_ip);
+
+                if (connect(ack_fd, (struct sockaddr *)&saddr, sizeof(saddr)) == 0) {
+                    send(ack_fd, ack, (size_t)(alen + 1), 0);
+                }
+                close(ack_fd);
             }
         }
-        pthread_mutex_unlock(&conn_mutex);
     }
     return 0;
 }
@@ -131,7 +97,6 @@ static void send_code(int fd, uint8_t code) {
     (void)send(fd, &code, 1, 0);
 }
 
-/* lee hasta '\0' y parte el buffer por '#' en fields[] */
 static int recv_msg(int fd, char fields[][MAX_NAME], int max_fields) {
     char buf[MAX_NAME * 3 + 64];
     int  n = 0;
@@ -169,7 +134,6 @@ static char *get_local_ip(void) {
     return inet_ntoa(*(struct in_addr *)he->h_addr_list[0]);
 }
 
-/* 1 = REGISTER: "1#nombre\0" → byte resultado */
 static void handle_register(int fd, char fields[][MAX_NAME], int nfields) {
     if (nfields < 2) { send_code(fd, 2); return; }
     int r = user_add(fields[1]);
@@ -178,7 +142,6 @@ static void handle_register(int fd, char fields[][MAX_NAME], int nfields) {
     else        printf("s> REGISTER %s FAIL\n", fields[1]);
 }
 
-/* 2 = UNREGISTER: "2#nombre\0" → byte resultado */
 static void handle_unregister(int fd, char fields[][MAX_NAME], int nfields) {
     if (nfields < 2) { send_code(fd, 2); return; }
     int r = user_remove(fields[1]);
@@ -187,14 +150,14 @@ static void handle_unregister(int fd, char fields[][MAX_NAME], int nfields) {
     else        printf("s> UNREGISTER %s FAIL\n", fields[1]);
 }
 
-/* 3 = CONNECT: "3#nombre\0" → byte resultado
- * Mantiene el socket abierto; cierra fd él mismo (no handle_client) */
 static void handle_connect(int fd, const char *client_ip,
                            char fields[][MAX_NAME], int nfields) {
-    if (nfields < 2) { send_code(fd, 3); close(fd); return; }
+    // Port is sent by the Python client in fields[2]
+    if (nfields < 3) { send_code(fd, 3); close(fd); return; }
     const char *name = fields[1];
+    uint16_t client_port = (uint16_t) atoi(fields[2]);
 
-    int r = user_connect(name, client_ip, 0);
+    int r = user_connect(name, client_ip, client_port);
     send_code(fd, (uint8_t)r);
 
     if (r != 0) {
@@ -204,7 +167,11 @@ static void handle_connect(int fd, const char *client_ip,
     }
     printf("s> CONNECT %s OK\n", name);
 
-    conn_add(name, fd);
+    // Close the original CONNECT fd to let the Python client proceed
+    close(fd);
+
+    // Give the client time to `bind` and `listen` on its new socket
+    usleep(100000);
 
     /* entregar mensajes pendientes que haya en la BD */
     unsigned int mid;
@@ -212,17 +179,8 @@ static void handle_connect(int fd, const char *client_ip,
     while (msg_get_next(name, &mid, sender, text) == 0) {
         if (conn_deliver(name, sender, mid, text) < 0) break;
     }
-
-    /* bloquearse hasta que el cliente desconecte o se caiga */
-    char dummy[1];
-    while (recv(fd, dummy, 1, 0) > 0) { }
-
-    conn_remove(name);
-    user_disconnect(name);  /* puede devolver 2 si ya fue desconectado por DISCONNECT */
-    close(fd);
 }
 
-/* 4 = DISCONNECT: "4#nombre\0" → byte resultado */
 static void handle_disconnect(int fd, const char *client_ip,
                               char fields[][MAX_NAME], int nfields) {
     if (nfields < 2) { send_code(fd, 3); return; }
@@ -233,24 +191,11 @@ static void handle_disconnect(int fd, const char *client_ip,
     uint16_t stored_port;
     int conn = user_get_conn_info(name, stored_ip, &stored_port);
 
-    if (conn == 1) {
-        send_code(fd, 1);
+    if (conn == 1 || conn == 2 || strcmp(stored_ip, client_ip) != 0) {
+        send_code(fd, (conn == 1) ? 1 : ((conn == 2) ? 2 : 3));
         printf("s> DISCONNECT %s FAIL\n", name);
         return;
     }
-    if (conn == 2) {
-        send_code(fd, 2);
-        printf("s> DISCONNECT %s FAIL\n", name);
-        return;
-    }
-    if (strcmp(stored_ip, client_ip) != 0) {
-        send_code(fd, 3);
-        printf("s> DISCONNECT %s FAIL\n", name);
-        return;
-    }
-
-    /* desbloquea el recv en handle_connect */
-    conn_shutdown(name);
 
     int r = user_disconnect(name);
     send_code(fd, (uint8_t)r);
@@ -258,7 +203,6 @@ static void handle_disconnect(int fd, const char *client_ip,
     else        printf("s> DISCONNECT %s FAIL\n", name);
 }
 
-/* 5 = SEND: "5#remitente#destinatario#mensaje\0" → byte [+ id_str\0] */
 static void handle_send(int fd, char fields[][MAX_NAME], int nfields) {
     if (nfields < 4) { send_code(fd, 2); return; }
     const char *sender   = fields[1];
@@ -285,7 +229,6 @@ static void handle_send(int fd, char fields[][MAX_NAME], int nfields) {
     }
 }
 
-/* 7 = USERS: "7#nombre\0" → byte [+ count\0 + nombre1\0 + ...] */
 static void handle_users(int fd, char fields[][MAX_NAME], int nfields) {
     if (nfields < 2) { send_code(fd, 2); return; }
     const char *name = fields[1];
@@ -294,13 +237,8 @@ static void handle_users(int fd, char fields[][MAX_NAME], int nfields) {
     uint16_t dummy_port;
     int conn = user_get_conn_info(name, dummy_ip, &dummy_port);
 
-    if (conn == 1) {
-        send_code(fd, 2);
-        printf("s> CONNECTEDUSERS FAIL\n");
-        return;
-    }
-    if (conn == 2) {
-        send_code(fd, 1);
+    if (conn == 1 || conn == 2) {
+        send_code(fd, (conn == 1) ? 2 : 1);
         printf("s> CONNECTEDUSERS FAIL\n");
         return;
     }
@@ -335,11 +273,19 @@ static void *handle_client(void *arg) {
     int  nfields = recv_msg(fd, fields, 8);
     if (nfields < 1) { close(fd); return NULL; }
 
-    int op = atoi(fields[0]);
+    // Use strcmp since the protocol sends commands as STRINGS, not integers
+    int op = -1;
+    if (strcmp(fields[0], "REGISTER") == 0) op = 1;
+    else if (strcmp(fields[0], "UNREGISTER") == 0) op = 2;
+    else if (strcmp(fields[0], "CONNECT") == 0) op = 3;
+    else if (strcmp(fields[0], "DISCONNECT") == 0) op = 4;
+    else if (strcmp(fields[0], "SEND") == 0) op = 5;
+    else if (strcmp(fields[0], "USERS") == 0) op = 7;
+
     switch (op) {
         case 1: handle_register  (fd,     fields, nfields); break;
         case 2: handle_unregister(fd,     fields, nfields); break;
-        case 3: handle_connect   (fd, ip, fields, nfields); return NULL; /* gestiona fd */
+        case 3: handle_connect   (fd, ip, fields, nfields); return NULL; /* fd managed inside */
         case 4: handle_disconnect(fd, ip, fields, nfields); break;
         case 5: handle_send      (fd,     fields, nfields); break;
         case 7: handle_users     (fd,     fields, nfields); break;
@@ -362,8 +308,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Uso: %s -p <puerto>\n", argv[0]);
         return 1;
     }
-
-    conn_table_init();
 
     if (db_init() != 0) {
         fprintf(stderr, "Error al inicializar la base de datos\n");

@@ -1,18 +1,5 @@
 import sys, socket, threading, time
 
-# Protocolo según especificación PDF (Sección 8):
-# - REGISTER: registro de usuario
-# - UNREGISTER: baja de usuario
-# - CONNECT: conexión al servicio (el cliente debe crear un thread para escuchar mensajes)
-# - DISCONNECT: desconexión del servicio
-# - SEND: envío de mensaje
-# - USERS: solicitud de usuarios conectados
-#
-# Respuesta del servidor: un byte (0=ok, 1/2/3=error según operación)
-#
-# Mensajes entrantes por la conexión creada en CONNECT:
-#   "SEND_MESSAGE#remitente#id#texto\0"
-#   "SEND_MESS_ACK#id\0"
 
 class Client:
     MAX_MSG_SIZE = 255
@@ -66,12 +53,6 @@ class Client:
         """
         Función que ejecuta el hilo en background para mantener la conexión persistente
         y recibir mensajes del servidor.
-
-        Según especificación (Sección 6.4):
-        1. Buscar puerto libre
-        2. Crear hilo (este método)
-        3. Enviar solicitud de conexión al servidor con IP:puerto
-        4. El servidor usará esa IP:puerto para enviar mensajes
         """
         # Primero buscamos un puerto libre
         temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -105,8 +86,6 @@ class Client:
                         while not self._terminate:
                             try:
                                 connection, connected_address = msg_lst_socket.accept()
-                                # Por seguridad, solo aceptamos conexiones del servidor
-                                # (aunque en la práctica la IP puede cambiar, este es un check básico)
 
                                 # Recibir el mensaje completo
                                 msg = self._recv_str(connection)
@@ -117,7 +96,7 @@ class Client:
                             except socket.timeout:
                                 # Timeout normal, continuar el loop para verificar _terminate
                                 continue
-                            except Exception as e:
+                            except Exception:
                                 # Error en la conexión, continuar
                                 continue
 
@@ -138,10 +117,6 @@ class Client:
     def _parse_incoming_message(self, message: str):
         """
         Parsea los mensajes recibidos a través del socket de mensajes.
-
-        Según especificación (Sección 8.6):
-        - SEND_MESSAGE: "SEND_MESSAGE#remitente#id#texto\0"
-        - SEND_MESS_ACK: "SEND_MESS_ACK#id\0" (confirmación de entrega)
         """
         parts = message.split('#', 3)
         if not parts:
@@ -151,30 +126,19 @@ class Client:
         if op == "SEND_MESSAGE" and len(parts) == 4:
             # Mensaje recibido de otro usuario
             _, sender, mid, text = parts
-            print(f"s> MESSAGE {mid} FROM {sender}")
-            print(f"    {text}")
-            print(f"    END")
-            print("c> ", end="", flush=True)
+            print(f"MESSAGE {mid} FROM {sender}"
+                  f"\n\t{text}\n\tEND", end="\nc> ")
         elif op == "SEND_MESS_ACK" and len(parts) == 2:
             # Confirmación de que nuestro mensaje fue entregado
             _, mid = parts
-            print(f"c> SEND MESSAGE {mid} OK")
-            print("c> ", end="", flush=True)
+            print(f"SEND MESSAGE {mid} OK", end="\nc> ")
 
     def register(self, username: str):
         """
         Registra un usuario en el sistema.
-
-        Protocolo según Sección 8.1:
-        1. Conectar al servidor
-        2. Enviar "REGISTER"
-        3. Enviar nombre de usuario
-        4. Recibir código de respuesta (0=ok, 1=usuario existe, 2=error)
-        5. Cerrar conexión
         """
         self._get_connection()
-        self._send(self._server_socket, "REGISTER")
-        self._send(self._server_socket, username)
+        self._send(self._server_socket, f"REGISTER#{username}")
 
         try:
             response = self._recv_code(self._server_socket)
@@ -194,17 +158,9 @@ class Client:
     def unregister(self, username: str):
         """
         Da de baja un usuario del sistema.
-
-        Protocolo según Sección 8.2:
-        1. Conectar al servidor
-        2. Enviar "UNREGISTER"
-        3. Enviar nombre de usuario
-        4. Recibir código de respuesta (0=ok, 1=no existe, 2=error)
-        5. Cerrar conexión
         """
         self._get_connection()
-        self._send(self._server_socket, "UNREGISTER")
-        self._send(self._server_socket, username)
+        self._send(self._server_socket, f"UNREGISTER#{username}")
 
         try:
             response = self._recv_code(self._server_socket)
@@ -224,11 +180,6 @@ class Client:
     def connect(self, username: str):
         """
         Conecta un usuario al sistema de mensajería.
-
-        Según especificación (Sección 6.4 y 8.3):
-        - Solo puede haber un usuario conectado a la vez desde este cliente
-        - Se debe crear un hilo para recibir mensajes
-        - El hilo busca un puerto libre y se queda escuchando
         """
         # Si ya existe un hilo de escucha, no permitir nueva conexión
         if self._listening_thread:
@@ -249,13 +200,6 @@ class Client:
     def disconnect(self, username: str):
         """
         Desconecta un usuario del sistema de mensajería.
-
-        Protocolo según Sección 8.4:
-        1. Conectar al servidor
-        2. Enviar "DISCONNECT"
-        3. Enviar nombre de usuario
-        4. Recibir código (0=ok, 1=no existe, 2=no conectado, 3=error)
-        5. Cerrar conexión
         """
         # Evitar peticiones innecesarias si no hay conexión activa
         if not self._listening_thread:
@@ -263,8 +207,7 @@ class Client:
             return
 
         self._get_connection()
-        self._send(self._server_socket, "DISCONNECT")
-        self._send(self._server_socket, username)
+        self._send(self._server_socket, f"DISCONNECT#{username}")
 
         try:
             response = self._recv_code(self._server_socket)
@@ -298,15 +241,6 @@ class Client:
     def send(self, username: str, message: str):
         """
         Envía un mensaje a otro usuario.
-
-        Protocolo según Sección 8.5:
-        1. Conectar al servidor
-        2. Enviar "SEND"
-        3. Enviar nombre del remitente (usuario conectado)
-        4. Enviar nombre del destinatario
-        5. Enviar el mensaje (máx 256 bytes incluyendo \0)
-        6. Recibir código (0=ok + id del mensaje, 1=usuario no existe, 2=error)
-        7. Cerrar conexión
         """
         # Evitar peticiones innecesarias si no estamos conectados
         if not self._connected_user:
@@ -314,10 +248,7 @@ class Client:
             return
 
         self._get_connection()
-        self._send(self._server_socket, "SEND")
-        self._send(self._server_socket, self._connected_user)  # Remitente
-        self._send(self._server_socket, username)  # Destinatario
-        self._send(self._server_socket, message)  # Mensaje
+        self._send(self._server_socket, f"SEND#{self._connected_user}#{username}#{message}")
 
         try:
             response = self._recv_code(self._server_socket)
@@ -343,21 +274,12 @@ class Client:
     def users(self):
         """
         Solicita la lista de usuarios conectados.
-
-        Protocolo según Sección 8.7:
-        1. Conectar al servidor
-        2. Enviar "USERS"
-        3. Enviar nombre del usuario que hace la petición
-        4. Recibir código (0=ok, 1=no conectado, 2=error)
-        5. Si ok: recibir cantidad de usuarios + lista de nombres
-        6. Cerrar conexión
         """
         self._get_connection()
 
         # Enviar el nombre del usuario conectado, o cadena vacía si no hay usuario conectado
         name = self._connected_user if self._connected_user else ""
-        self._send(self._server_socket, "USERS")
-        self._send(self._server_socket, name)
+        self._send(self._server_socket, f"USERS#{name}")
 
         try:
             response = self._recv_code(self._server_socket)
