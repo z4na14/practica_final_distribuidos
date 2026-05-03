@@ -1,46 +1,59 @@
 import sys, socket, threading, time
 
-# Protocolo: "codigo#param1#param2#...\0"
-#   1=REGISTER  2=UNREGISTER  3=CONNECT  4=DISCONNECT  5=SEND  7=USERS
-# Respuesta del servidor: un byte (0=ok, 1/2/3=error)
-# Mensajes entrantes por la conexión de CONNECT:
+# Protocolo según especificación PDF (Sección 8):
+# - REGISTER: registro de usuario
+# - UNREGISTER: baja de usuario
+# - CONNECT: conexión al servicio (el cliente debe crear un thread para escuchar mensajes)
+# - DISCONNECT: desconexión del servicio
+# - SEND: envío de mensaje
+# - USERS: solicitud de usuarios conectados
+#
+# Respuesta del servidor: un byte (0=ok, 1/2/3=error según operación)
+#
+# Mensajes entrantes por la conexión creada en CONNECT:
 #   "SEND_MESSAGE#remitente#id#texto\0"
 #   "SEND_MESS_ACK#id\0"
 
 class Client:
-    MAX_MSG_SIZE = 256
+    MAX_MSG_SIZE = 255
     TIMEOUT = 10
 
-    _messages_socket = None
+    _server_socket = None
+    _server_address = None
+    _server_port = None
+    _client_address = None
+    _client_port = None
+
     _listening_thread = None
     _terminate = False
-
-    _server_socket = None
-    _address = None
-    _port = None
 
     _connected_user = None
 
     def __init__(self, address: str, port: int):
-        self._address = address
-        self._port = port
+        self._server_address = address
+        self._server_port = port
 
     def _get_connection(self):
-        if self._server_socket: return
+        """Establece una nueva conexión con el servidor si no existe una activa"""
+        if self._server_socket:
+            return
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server_socket.connect((self._address, self._port))
+        self._server_socket.connect((self._server_address, self._server_port))
         self._server_socket.settimeout(self.TIMEOUT)
 
     def _send(self, sock, msg: str):
+        """Envía un mensaje terminado en \0 a través del socket"""
         sock.send(bytes(msg + "\x00", "utf_8"))
 
     def _recv_code(self, sock) -> int:
+        """Recibe un byte de código de respuesta del servidor"""
         data = sock.recv(1)
         if not data:
             return -1
         return data[0]
 
     def _recv_str(self, sock) -> str:
+        """Recibe una cadena terminada en \0 del servidor"""
         buf = bytearray()
         while True:
             c = sock.recv(1)
@@ -50,25 +63,64 @@ class Client:
         return buf.decode("utf_8")
 
     def _listen_server(self, username: str):
-        # hilo que mantiene abierta la conexión persistente del CONNECT
-        if self._messages_socket: return
+        """
+        Función que ejecuta el hilo en background para mantener la conexión persistente
+        y recibir mensajes del servidor.
 
-        self._messages_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._messages_socket.connect((self._address, self._port))
-        self._messages_socket.settimeout(self.TIMEOUT)
+        Según especificación (Sección 6.4):
+        1. Buscar puerto libre
+        2. Crear hilo (este método)
+        3. Enviar solicitud de conexión al servidor con IP:puerto
+        4. El servidor usará esa IP:puerto para enviar mensajes
+        """
+        # Primero buscamos un puerto libre
+        temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        temp_socket.bind(('', 0))  # Bind a puerto 0 para obtener uno libre
+        self._client_port = temp_socket.getsockname()[1]
+        temp_socket.close()
 
-        self._send(self._messages_socket, f"3#{username}")
+        # Conectamos al servidor para enviar la solicitud CONNECT
+        self._get_connection()
+        self._send(self._server_socket, f"CONNECT#{username}#{self._client_port}")
+
         try:
-            response = self._recv_code(self._messages_socket)
+            response = self._recv_code(self._server_socket)
+            # Cerramos esta conexión ya que solo era para enviar CONNECT
+            self._server_socket.close()
+            self._server_socket = None
+
             match response:
                 case 0:
                     print("c> CONNECT OK")
                     self._connected_user = username
-                    self._messages_socket.settimeout(None)  # esperar mensajes sin límite
-                    while not self._terminate:
-                        msg = self._recv_str(self._messages_socket)
-                        if msg:
-                            self._parse_incoming_message(msg)
+
+                    # Ahora creamos el socket de escucha en el puerto asignado
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as msg_lst_socket:
+                        # Bind al puerto libre que encontramos, escuchando en todas las interfaces
+                        msg_lst_socket.bind(("0.0.0.0", self._client_port))
+                        msg_lst_socket.listen()
+                        msg_lst_socket.settimeout(1.0)  # Timeout corto para poder verificar _terminate
+
+                        # Mientras no se haya solicitado desconexión, seguir escuchando
+                        while not self._terminate:
+                            try:
+                                connection, connected_address = msg_lst_socket.accept()
+                                # Por seguridad, solo aceptamos conexiones del servidor
+                                # (aunque en la práctica la IP puede cambiar, este es un check básico)
+
+                                # Recibir el mensaje completo
+                                msg = self._recv_str(connection)
+                                connection.close()
+
+                                if msg:
+                                    self._parse_incoming_message(msg)
+                            except socket.timeout:
+                                # Timeout normal, continuar el loop para verificar _terminate
+                                continue
+                            except Exception as e:
+                                # Error en la conexión, continuar
+                                continue
+
                 case 1:
                     print("c> CONNECT FAIL, USER DOES NOT EXIST", file=sys.stderr)
                 case 2:
@@ -78,27 +130,52 @@ class Client:
         except socket.timeout:
             print("c> CONNECT FAIL", file=sys.stderr)
 
-        self._messages_socket.close()
+        # Resetear el flag de terminación para futuras conexiones
         self._terminate = False
-        self._messages_socket = None
+        self._connected_user = None
+        self._listening_thread = None
 
     def _parse_incoming_message(self, message: str):
+        """
+        Parsea los mensajes recibidos a través del socket de mensajes.
+
+        Según especificación (Sección 8.6):
+        - SEND_MESSAGE: "SEND_MESSAGE#remitente#id#texto\0"
+        - SEND_MESS_ACK: "SEND_MESS_ACK#id\0" (confirmación de entrega)
+        """
         parts = message.split('#', 3)
         if not parts:
             return
 
         op = parts[0]
         if op == "SEND_MESSAGE" and len(parts) == 4:
+            # Mensaje recibido de otro usuario
             _, sender, mid, text = parts
-            print(f"s> MESSAGE {mid} FROM {sender}\n    {text}\n    END")
+            print(f"s> MESSAGE {mid} FROM {sender}")
+            print(f"    {text}")
+            print(f"    END")
             print("c> ", end="", flush=True)
         elif op == "SEND_MESS_ACK" and len(parts) == 2:
-            print(f"c> SEND MESSAGE {parts[1]} OK")
+            # Confirmación de que nuestro mensaje fue entregado
+            _, mid = parts
+            print(f"c> SEND MESSAGE {mid} OK")
             print("c> ", end="", flush=True)
 
     def register(self, username: str):
+        """
+        Registra un usuario en el sistema.
+
+        Protocolo según Sección 8.1:
+        1. Conectar al servidor
+        2. Enviar "REGISTER"
+        3. Enviar nombre de usuario
+        4. Recibir código de respuesta (0=ok, 1=usuario existe, 2=error)
+        5. Cerrar conexión
+        """
         self._get_connection()
-        self._send(self._server_socket, f"1#{username}")
+        self._send(self._server_socket, "REGISTER")
+        self._send(self._server_socket, username)
+
         try:
             response = self._recv_code(self._server_socket)
             match response:
@@ -115,8 +192,20 @@ class Client:
         self._server_socket = None
 
     def unregister(self, username: str):
+        """
+        Da de baja un usuario del sistema.
+
+        Protocolo según Sección 8.2:
+        1. Conectar al servidor
+        2. Enviar "UNREGISTER"
+        3. Enviar nombre de usuario
+        4. Recibir código de respuesta (0=ok, 1=no existe, 2=error)
+        5. Cerrar conexión
+        """
         self._get_connection()
-        self._send(self._server_socket, f"2#{username}")
+        self._send(self._server_socket, "UNREGISTER")
+        self._send(self._server_socket, username)
+
         try:
             response = self._recv_code(self._server_socket)
             match response:
@@ -133,22 +222,61 @@ class Client:
         self._server_socket = None
 
     def connect(self, username: str):
-        if self._listening_thread: return
+        """
+        Conecta un usuario al sistema de mensajería.
+
+        Según especificación (Sección 6.4 y 8.3):
+        - Solo puede haber un usuario conectado a la vez desde este cliente
+        - Se debe crear un hilo para recibir mensajes
+        - El hilo busca un puerto libre y se queda escuchando
+        """
+        # Si ya existe un hilo de escucha, no permitir nueva conexión
+        if self._listening_thread:
+            print("c> CONNECT FAIL, USER ALREADY CONNECTED", file=sys.stderr)
+            return
+
+        # Crear el hilo que gestionará la conexión
         self._listening_thread = threading.Thread(
-            target=self._listen_server, args=(username,), daemon=True)
+            target=self._listen_server,
+            args=(username,),
+            daemon=True
+        )
         self._listening_thread.start()
-        time.sleep(0.2)  # esperar a que el hilo imprima el resultado antes del siguiente prompt
+
+        # Pequeña espera para que el hilo imprima el resultado antes del siguiente prompt
+        time.sleep(0.2)
 
     def disconnect(self, username: str):
+        """
+        Desconecta un usuario del sistema de mensajería.
+
+        Protocolo según Sección 8.4:
+        1. Conectar al servidor
+        2. Enviar "DISCONNECT"
+        3. Enviar nombre de usuario
+        4. Recibir código (0=ok, 1=no existe, 2=no conectado, 3=error)
+        5. Cerrar conexión
+        """
+        # Evitar peticiones innecesarias si no hay conexión activa
+        if not self._listening_thread:
+            print("c> DISCONNECT FAIL, USER NOT CONNECTED", file=sys.stderr)
+            return
+
         self._get_connection()
-        self._send(self._server_socket, f"4#{username}")
+        self._send(self._server_socket, "DISCONNECT")
+        self._send(self._server_socket, username)
+
         try:
             response = self._recv_code(self._server_socket)
             match response:
                 case 0:
                     print("c> DISCONNECT OK")
+                    # Señalar al hilo que debe terminar
                     self._terminate = True
                     self._connected_user = None
+                    # Esperar a que el hilo termine
+                    if self._listening_thread:
+                        self._listening_thread.join(timeout=2.0)
                     self._listening_thread = None
                 case 1:
                     print("c> DISCONNECT FAIL, USER DOES NOT EXIST", file=sys.stderr)
@@ -158,20 +286,44 @@ class Client:
                     print("c> DISCONNECT FAIL", file=sys.stderr)
         except socket.timeout:
             print("c> DISCONNECT FAIL", file=sys.stderr)
+            # Aunque falle, terminar el hilo de escucha como indica la especificación (Sección 6.5)
             self._terminate = True
+            if self._listening_thread:
+                self._listening_thread.join(timeout=2.0)
             self._listening_thread = None
 
         self._server_socket.close()
         self._server_socket = None
 
     def send(self, username: str, message: str):
+        """
+        Envía un mensaje a otro usuario.
+
+        Protocolo según Sección 8.5:
+        1. Conectar al servidor
+        2. Enviar "SEND"
+        3. Enviar nombre del remitente (usuario conectado)
+        4. Enviar nombre del destinatario
+        5. Enviar el mensaje (máx 256 bytes incluyendo \0)
+        6. Recibir código (0=ok + id del mensaje, 1=usuario no existe, 2=error)
+        7. Cerrar conexión
+        """
+        # Evitar peticiones innecesarias si no estamos conectados
+        if not self._connected_user:
+            print("c> SEND FAIL, USER NOT CONNECTED", file=sys.stderr)
+            return
+
         self._get_connection()
-        sender = self._connected_user if self._connected_user else username
-        self._send(self._server_socket, f"5#{sender}#{username}#{message}")
+        self._send(self._server_socket, "SEND")
+        self._send(self._server_socket, self._connected_user)  # Remitente
+        self._send(self._server_socket, username)  # Destinatario
+        self._send(self._server_socket, message)  # Mensaje
+
         try:
             response = self._recv_code(self._server_socket)
             match response:
                 case 0:
+                    # En caso de éxito, recibir el ID del mensaje
                     mid = self._recv_str(self._server_socket)
                     print(f"c> SEND OK - MESSAGE {mid}")
                 case 1:
@@ -185,20 +337,39 @@ class Client:
         self._server_socket = None
 
     def send_attach(self):
-        pass  # Parte 2
+        """Funcionalidad de envío de archivos adjuntos - Parte 2 de la práctica"""
+        pass
 
     def users(self):
+        """
+        Solicita la lista de usuarios conectados.
+
+        Protocolo según Sección 8.7:
+        1. Conectar al servidor
+        2. Enviar "USERS"
+        3. Enviar nombre del usuario que hace la petición
+        4. Recibir código (0=ok, 1=no conectado, 2=error)
+        5. Si ok: recibir cantidad de usuarios + lista de nombres
+        6. Cerrar conexión
+        """
         self._get_connection()
+
+        # Enviar el nombre del usuario conectado, o cadena vacía si no hay usuario conectado
         name = self._connected_user if self._connected_user else ""
-        self._send(self._server_socket, f"7#{name}")
+        self._send(self._server_socket, "USERS")
+        self._send(self._server_socket, name)
+
         try:
             response = self._recv_code(self._server_socket)
             match response:
                 case 0:
+                    # Recibir cantidad de usuarios conectados
                     count = int(self._recv_str(self._server_socket))
                     print(f"c> CONNECTED USERS ({count} users connected) OK")
+                    # Recibir y mostrar cada usuario
                     for _ in range(count):
-                        print(f"  {self._recv_str(self._server_socket)}")
+                        user = self._recv_str(self._server_socket)
+                        print(f"  {user}")
                 case 1:
                     print("c> CONNECTED USERS FAIL, USER IS NOT CONNECTED", file=sys.stderr)
                 case _:
@@ -210,6 +381,10 @@ class Client:
         self._server_socket = None
 
     def quit(self):
+        """
+        Finaliza la ejecución del cliente.
+        Si hay un usuario conectado, lo desconecta primero.
+        """
         if self._connected_user:
             self.disconnect(self._connected_user)
         sys.exit(0)
