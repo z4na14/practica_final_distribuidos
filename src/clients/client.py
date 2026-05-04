@@ -45,11 +45,11 @@ def read_input(client: Client):
 
             client.send(curr_command[1], curr_command[2])
 
-        #elif curr_command[0] == "SENDATTACH":
-            #if len(curr_command) < 3:
-            #    print("INVALID COMMAND: SENDATTACH <userName> <message>", file=sys.stderr)
-            #    continue
-            #client.send_attach()
+        elif curr_command[0] == "SENDATTACH":
+            if len(curr_command) < 3:
+                print("INVALID COMMAND: SENDATTACH <userName> <message>", file=sys.stderr)
+                continue
+            client.send_attach()
 
         elif curr_command[0] == "USERS":
             client.users()
