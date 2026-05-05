@@ -15,4 +15,4 @@ def quitar_espacios():
         return {"error": str(e)}, 415
 
 
-app.run(debug=False, host="127.0.0.1", port="3000")
+app.run(debug=False, host="127.0.0.1", port=3000)

@@ -19,7 +19,7 @@ static int server_fd = -1;
 
 /* Datos que se pasan a cada hilo al aceptar una conexión entrante */
 typedef struct {
-    int  fd;
+    int fd;
     char ip[16];
 } ClientArg;
 
@@ -27,46 +27,45 @@ typedef struct {
    y le entrega el mensaje. Si el receptor también está conectado, le
    manda un ACK al emisor. Devuelve 0 si todo fue bien, -1 si falló. */
 static int conn_deliver(const char *receiver, const char *sender,
-                        unsigned int msg_id, const char *text) {
+                        const unsigned int msg_id, const char *text) {
     char msg_id_str[32];
     snprintf(msg_id_str, sizeof(msg_id_str), "%u", msg_id);
 
     /* Construimos la trama que recibirá el cliente destinatario */
     char message[MAX_NAME + MAX_MSG + 64];
-    int  message_len = snprintf(message, sizeof(message), "SEND_MESSAGE#%s#%s#%s",
-                                sender, msg_id_str, text);
-    if (message_len < 0 || message_len >= (int)sizeof(message)) {
+    const size_t message_len = snprintf(message, sizeof(message), "SEND_MESSAGE#%s#%s#%s",
+                               sender, msg_id_str, text);
+    if (message_len == 0 || message_len >= (int) sizeof(message)) {
         return -1;
     }
     message[message_len] = '\0';
 
     /* Consultamos la BD para obtener la IP y puerto del receptor */
-    char     receiver_ip[16];
+    char receiver_ip[16];
     uint16_t receiver_port;
     if (user_get_conn_info(receiver, receiver_ip, &receiver_port) != 0) {
         return -1; /* el receptor no está conectado */
     }
 
     /* Abrimos una conexión hacia el socket de escucha del receptor y le mandamos el mensaje */
-    int receiver_fd = socket(AF_INET, SOCK_STREAM, 0);
+    const int receiver_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (receiver_fd < 0) {
         return -1;
     }
 
-    struct sockaddr_in receiver_addr;
-    memset(&receiver_addr, 0, sizeof(receiver_addr));
-    receiver_addr.sin_family      = AF_INET;
-    receiver_addr.sin_port        = htons(receiver_port);
+    struct sockaddr_in receiver_addr = {0};
+    receiver_addr.sin_family = AF_INET;
+    receiver_addr.sin_port = htons(receiver_port);
     receiver_addr.sin_addr.s_addr = inet_addr(receiver_ip);
 
-    if (connect(receiver_fd, (struct sockaddr *)&receiver_addr, sizeof(receiver_addr)) < 0) {
+    if (connect(receiver_fd, (struct sockaddr *) &receiver_addr, sizeof(receiver_addr)) < 0) {
         /* Si no podemos conectar, el receptor se fue sin desconectarse: lo marcamos offline */
         user_disconnect(receiver);
         close(receiver_fd);
         return -1;
     }
 
-    ssize_t bytes_sent = send(receiver_fd, message, (size_t)(message_len + 1), 0);
+    ssize_t bytes_sent = send(receiver_fd, message, (message_len + 1), 0);
     close(receiver_fd);
 
     if (bytes_sent <= 0) {
@@ -79,51 +78,50 @@ static int conn_deliver(const char *receiver, const char *sender,
 
     /* Ahora le avisamos al emisor de que el mensaje llegó correctamente */
     char ack_message[64];
-    int  ack_len = snprintf(ack_message, sizeof(ack_message), "SEND_MESS_ACK#%s", msg_id_str);
-    if (ack_len <= 0 || ack_len >= (int)sizeof(ack_message)) {
+    const size_t ack_len = snprintf(ack_message, sizeof(ack_message), "SEND_MESS_ACK#%s", msg_id_str);
+    if (ack_len <= 0 || ack_len >= (int) sizeof(ack_message)) {
         return 0; /* el mensaje se entregó aunque no podamos mandar el ACK */
     }
     ack_message[ack_len] = '\0';
 
-    char     sender_ip[16];
+    char sender_ip[16];
     uint16_t sender_port;
     if (user_get_conn_info(sender, sender_ip, &sender_port) != 0) {
         return 0; /* el emisor ya se desconectó, no pasa nada */
     }
 
-    int sender_fd = socket(AF_INET, SOCK_STREAM, 0);
+    const int sender_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sender_fd < 0) {
         return 0;
     }
 
-    struct sockaddr_in sender_addr;
-    memset(&sender_addr, 0, sizeof(sender_addr));
-    sender_addr.sin_family      = AF_INET;
-    sender_addr.sin_port        = htons(sender_port);
+    struct sockaddr_in sender_addr = {0};
+    sender_addr.sin_family = AF_INET;
+    sender_addr.sin_port = htons(sender_port);
     sender_addr.sin_addr.s_addr = inet_addr(sender_ip);
 
-    if (connect(sender_fd, (struct sockaddr *)&sender_addr, sizeof(sender_addr)) == 0) {
-        send(sender_fd, ack_message, (size_t)(ack_len + 1), 0);
+    if (connect(sender_fd, (struct sockaddr *) &sender_addr, sizeof(sender_addr)) == 0) {
+        send(sender_fd, ack_message, (size_t) (ack_len + 1), 0);
     }
     close(sender_fd);
     return 0;
 }
 
 /* Envía un byte de código de respuesta al cliente */
-static void send_code(int client_fd, uint8_t code) {
-    (void)send(client_fd, &code, 1, 0);
+static void send_code(const int client_fd, const uint8_t code) {
+    (void) send(client_fd, &code, 1, 0);
 }
 
 /* Lee un mensaje separado por '#' y terminado en '\0' del socket.
    Rellena el array de campos y devuelve cuántos campos se leyeron,
    o -1 si la conexión se cerró o si el mensaje está vacío. */
-static int recv_msg(int client_fd, char fields[][MAX_NAME], int max_fields) {
+static int recv_msg(const int client_fd, char fields[][MAX_NAME]) {
     char raw_buf[MAX_NAME * 3 + 64];
-    int  bytes_read = 0;
+    int bytes_read = 0;
     char c;
 
     /* Leer byte a byte hasta encontrar '\0' */
-    while (bytes_read < (int)sizeof(raw_buf) - 1) {
+    while (bytes_read < (int) sizeof(raw_buf) - 1) {
         if (recv(client_fd, &c, 1, 0) <= 0) {
             return -1;
         }
@@ -139,11 +137,11 @@ static int recv_msg(int client_fd, char fields[][MAX_NAME], int max_fields) {
     }
 
     /* Partir el buffer por '#' y copiar cada trozo en su campo */
-    int   field_count = 0;
-    char *cursor      = raw_buf;
-    while (field_count < max_fields) {
-        char  *separator = strchr(cursor, '#');
-        size_t field_len = separator ? (size_t)(separator - cursor) : strlen(cursor);
+    int field_count = 0;
+    char *cursor = raw_buf;
+    while (field_count < MAX_MSG_FIELDS) {
+        char *separator = strchr(cursor, '#');
+        size_t field_len = separator ? (size_t) (separator - cursor) : strlen(cursor);
         if (field_len >= MAX_NAME) {
             field_len = MAX_NAME - 1;
         }
@@ -171,7 +169,7 @@ static char *get_local_ip(void) {
     if (!host_entry) {
         return "127.0.0.1";
     }
-    return inet_ntoa(*(struct in_addr *)host_entry->h_addr_list[0]);
+    return inet_ntoa(*(struct in_addr *) host_entry->h_addr_list[0]);
 }
 
 /* Registra un nuevo usuario en el sistema. El nombre viene en fields[1].
@@ -182,9 +180,9 @@ static void handle_register(int client_fd, char fields[][MAX_NAME], int field_co
         return;
     }
     int result = user_add(fields[1]);
-    send_code(client_fd, (uint8_t)result);
+    send_code(client_fd, (uint8_t) result);
     if (result == 0) {
-        printf("s> REGISTER %s OK\n",   fields[1]);
+        printf("s> REGISTER %s OK\n", fields[1]);
         rpc_log(fields[1], "REGISTER", "");
     } else {
         printf("s> REGISTER %s FAIL\n", fields[1]);
@@ -199,9 +197,9 @@ static void handle_unregister(int client_fd, char fields[][MAX_NAME], int field_
         return;
     }
     int result = user_remove(fields[1]);
-    send_code(client_fd, (uint8_t)result);
+    send_code(client_fd, (uint8_t) result);
     if (result == 0) {
-        printf("s> UNREGISTER %s OK\n",   fields[1]);
+        printf("s> UNREGISTER %s OK\n", fields[1]);
         rpc_log(fields[1], "UNREGISTER", "");
     } else {
         printf("s> UNREGISTER %s FAIL\n", fields[1]);
@@ -219,11 +217,11 @@ static void handle_connect(int client_fd, const char *client_ip,
         close(client_fd);
         return;
     }
-    const char *username    = fields[1];
-    uint16_t    listen_port = (uint16_t)atoi(fields[2]);
+    const char *username = fields[1];
+    uint16_t listen_port = (uint16_t) atoi(fields[2]);
 
     int result = user_connect(username, client_ip, listen_port);
-    send_code(client_fd, (uint8_t)result);
+    send_code(client_fd, (uint8_t) result);
 
     if (result != 0) {
         printf("s> CONNECT %s FAIL\n", username);
@@ -243,8 +241,8 @@ static void handle_connect(int client_fd, const char *client_ip,
 
     /* Entregar todos los mensajes que se acumularon mientras estaba offline */
     unsigned int msg_id;
-    char         pending_sender[MAX_NAME];
-    char         pending_text[MAX_MSG];
+    char pending_sender[MAX_NAME];
+    char pending_text[MAX_MSG];
     while (msg_get_next(username, &msg_id, pending_sender, pending_text) == 0) {
         if (conn_deliver(username, pending_sender, msg_id, pending_text) < 0) {
             break;
@@ -265,7 +263,7 @@ static void handle_disconnect(int client_fd, const char *client_ip,
 
     /* Comprobamos que la petición viene de la misma IP que usó para conectarse,
        para evitar que otro host desconecte a un usuario ajeno */
-    char     stored_ip[16];
+    char stored_ip[16];
     uint16_t stored_port;
     int conn_status = user_get_conn_info(username, stored_ip, &stored_port);
 
@@ -276,9 +274,9 @@ static void handle_disconnect(int client_fd, const char *client_ip,
     }
 
     int result = user_disconnect(username);
-    send_code(client_fd, (uint8_t)result);
+    send_code(client_fd, (uint8_t) result);
     if (result == 0) {
-        printf("s> DISCONNECT %s OK\n",   username);
+        printf("s> DISCONNECT %s OK\n", username);
         rpc_log(username, "DISCONNECT", "");
     } else {
         printf("s> DISCONNECT %s FAIL\n", username);
@@ -293,12 +291,12 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
         send_code(client_fd, 2);
         return;
     }
-    const char *sender   = fields[1];
+    const char *sender = fields[1];
     const char *receiver = fields[2];
-    const char *text     = fields[3];
+    const char *text = fields[3];
 
     /* Verificamos que el destinatario existe (si no existe, devolvemos error 1) */
-    char     unused_ip[16];
+    char unused_ip[16];
     uint16_t unused_port;
     if (user_get_conn_info(receiver, unused_ip, &unused_port) == 1) {
         send_code(client_fd, 1);
@@ -316,7 +314,7 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
     send_code(client_fd, 0);
     char msg_id_str[32];
     snprintf(msg_id_str, sizeof(msg_id_str), "%u", msg_id);
-    (void)send(client_fd, msg_id_str, strlen(msg_id_str) + 1, 0);
+    (void) send(client_fd, msg_id_str, strlen(msg_id_str) + 1, 0);
     rpc_log(sender, "SEND", "");
 
     /* Intentamos entrega inmediata si el receptor está conectado.
@@ -337,7 +335,7 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
     const char *username = fields[1];
 
     /* Solo los usuarios conectados pueden pedir la lista */
-    char     unused_ip[16];
+    char unused_ip[16];
     uint16_t unused_port;
     int conn_status = user_get_conn_info(username, unused_ip, &unused_port);
 
@@ -348,7 +346,7 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
     }
 
     char connected_names[MAX_USERS][MAX_NAME];
-    int  user_count = users_get_connected(connected_names, MAX_USERS);
+    int user_count = users_get_connected(connected_names, MAX_USERS);
     if (user_count < 0) {
         send_code(client_fd, 2);
         printf("s> CONNECTEDUSERS FAIL\n");
@@ -359,9 +357,9 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
     send_code(client_fd, 0);
     char count_str[16];
     snprintf(count_str, sizeof(count_str), "%d", user_count);
-    (void)send(client_fd, count_str, strlen(count_str) + 1, 0);
+    (void) send(client_fd, count_str, strlen(count_str) + 1, 0);
     for (int i = 0; i < user_count; i++) {
-        (void)send(client_fd, connected_names[i], strlen(connected_names[i]) + 1, 0);
+        (void) send(client_fd, connected_names[i], strlen(connected_names[i]) + 1, 0);
     }
 
     printf("s> CONNECTEDUSERS OK\n");
@@ -370,15 +368,15 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
 
 /* Función ejecutada por cada hilo: lee un comando del socket y lo despacha */
 static void *handle_client(void *arg) {
-    ClientArg *client_arg = (ClientArg *)arg;
-    int  client_fd = client_arg->fd;
+    ClientArg *client_arg = (ClientArg *) arg;
+    const int client_fd = client_arg->fd;
     char client_ip[16];
     strncpy(client_ip, client_arg->ip, sizeof(client_ip) - 1);
     client_ip[sizeof(client_ip) - 1] = '\0';
     free(client_arg);
 
-    char message_fields[8][MAX_NAME];
-    int  field_count = recv_msg(client_fd, message_fields, 8);
+    char message_fields[MAX_MSG_FIELDS][MAX_NAME];
+    const int field_count = recv_msg(client_fd, message_fields);
     if (field_count < 1) {
         close(client_fd);
         return NULL;
@@ -386,20 +384,27 @@ static void *handle_client(void *arg) {
 
     /* El protocolo manda el comando como string, no como entero */
     int operation = -1;
-    if      (strcmp(message_fields[0], "REGISTER")   == 0) { operation = 1; }
-    else if (strcmp(message_fields[0], "UNREGISTER") == 0) { operation = 2; }
-    else if (strcmp(message_fields[0], "CONNECT")    == 0) { operation = 3; }
-    else if (strcmp(message_fields[0], "DISCONNECT") == 0) { operation = 4; }
-    else if (strcmp(message_fields[0], "SEND")       == 0) { operation = 5; }
-    else if (strcmp(message_fields[0], "USERS")      == 0) { operation = 7; }
+    if (strcmp(message_fields[0], "REGISTER") == 0) { operation = 1; } else if (
+        strcmp(message_fields[0], "UNREGISTER") == 0) { operation = 2; } else if (
+        strcmp(message_fields[0], "CONNECT") == 0) { operation = 3; } else if (
+        strcmp(message_fields[0], "DISCONNECT") == 0) { operation = 4; } else if (
+        strcmp(message_fields[0], "SEND") == 0) { operation = 5; } else if (strcmp(message_fields[0], "USERS") == 0) {
+        operation = 7;
+    }
 
     switch (operation) {
-        case 1: handle_register  (client_fd,            message_fields, field_count); break;
-        case 2: handle_unregister(client_fd,            message_fields, field_count); break;
-        case 3: handle_connect   (client_fd, client_ip, message_fields, field_count); return NULL; /* el fd lo cierra handle_connect */
-        case 4: handle_disconnect(client_fd, client_ip, message_fields, field_count); break;
-        case 5: handle_send      (client_fd,            message_fields, field_count); break;
-        case 7: handle_users     (client_fd,            message_fields, field_count); break;
+        case 1: handle_register(client_fd, message_fields, field_count);
+            break;
+        case 2: handle_unregister(client_fd, message_fields, field_count);
+            break;
+        case 3: handle_connect(client_fd, client_ip, message_fields, field_count);
+            return NULL; /* el fd lo cierra handle_connect */
+        case 4: handle_disconnect(client_fd, client_ip, message_fields, field_count);
+            break;
+        case 5: handle_send(client_fd, message_fields, field_count);
+            break;
+        case 7: handle_users(client_fd, message_fields, field_count);
+            break;
         default: break;
     }
 
@@ -408,8 +413,8 @@ static void *handle_client(void *arg) {
 }
 
 /* Handler de Ctrl+C: cierra el socket principal y la BD antes de salir */
-static void sigint_handler(int sig) {
-    (void)sig;
+static void sigint_handler(const int sig) {
+    (void) sig;
     if (server_fd >= 0) {
         close(server_fd);
         server_fd = -1;
@@ -418,7 +423,7 @@ static void sigint_handler(int sig) {
     exit(0);
 }
 
-int main(int argc, char *argv[]) {
+int main(const int argc, char *argv[]) {
     if (argc != 3 || strcmp(argv[1], "-p") != 0) {
         fprintf(stderr, "Uso: %s -p <puerto>\n", argv[0]);
         return 1;
@@ -431,25 +436,24 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, sigint_handler);
 
-    uint16_t listen_port = (uint16_t)atoi(argv[2]);
+    const uint16_t listen_port = (uint16_t) atoi(argv[2]);
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
-        perror("socket");
+        perror("Error al inicializar el socket");
         db_close();
         return 1;
     }
 
     /* SO_REUSEADDR permite reutilizar el puerto inmediatamente tras reiniciar el servidor */
-    int reuse_opt = 1;
+    constexpr int reuse_opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse_opt, sizeof(reuse_opt));
 
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family      = AF_INET;
-    server_addr.sin_port        = htons(listen_port);
+    struct sockaddr_in server_addr = {0};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(listen_port);
     server_addr.sin_addr.s_addr = INADDR_ANY;
 
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
         perror("bind");
         close(server_fd);
         db_close();
@@ -467,16 +471,14 @@ int main(int argc, char *argv[]) {
     fflush(stdout);
 
     struct sockaddr_in incoming_addr;
-    socklen_t          incoming_addr_len = sizeof(incoming_addr);
+    socklen_t incoming_addr_len = sizeof(incoming_addr);
 
     /* Bucle principal: aceptar conexiones y lanzar un hilo por cada una */
     while (1) {
         ClientArg *client_arg = malloc(sizeof(ClientArg));
-        if (!client_arg) {
-            break;
-        }
+        if (!client_arg) { break; }
 
-        client_arg->fd = accept(server_fd, (struct sockaddr *)&incoming_addr, &incoming_addr_len);
+        client_arg->fd = accept(server_fd, (struct sockaddr *) &incoming_addr, &incoming_addr_len);
         if (client_arg->fd < 0) {
             free(client_arg);
             break;

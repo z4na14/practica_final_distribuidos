@@ -11,7 +11,8 @@ class Client:
 
     server_socket = None
     _server_address = None
-    _server_port = None
+    _server_main_port = None
+    _server_ws_port = None
     _client_address = None
     _client_port = None
 
@@ -22,12 +23,15 @@ class Client:
 
     def __init__(self, address: str, port: int):
         self._server_address = address
-        self._server_port = port
+        self._server_main_port = port
+        # Definido estáticamente debido a que este
+        # no va a cambiar
+        self._server_ws_port = 3000
 
-    def _get_connection(self, retry: int = 0):
+    def _get_connection(self):
         """Establece una nueva conexión con el servidor si no existe una activa"""
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.connect((self._server_address, self._server_port))
+        server_socket.connect((self._server_address, self._server_main_port))
         server_socket.settimeout(self.TIMEOUT)
 
         return server_socket
@@ -135,7 +139,7 @@ class Client:
     def _normalize_message(self, message: str) -> str:
         try:
             resp = requests.post(
-                'http://127.0.0.1:3000/quitar-espacios',
+                f'http://{self._server_address}:{self._server_ws_port}/quitar-espacios',
                 json={'cadena': message},
                 timeout=2
             )
