@@ -11,6 +11,7 @@
 
 #include "common.h"
 #include "users.h"
+#include "log_client.h"
 
 /* fd del socket principal de escucha del servidor; necesitamos acceso global
    para poder cerrarlo limpiamente desde el manejador de señales */
@@ -184,6 +185,7 @@ static void handle_register(int client_fd, char fields[][MAX_NAME], int field_co
     send_code(client_fd, (uint8_t)result);
     if (result == 0) {
         printf("s> REGISTER %s OK\n",   fields[1]);
+        rpc_log(fields[1], "REGISTER", "");
     } else {
         printf("s> REGISTER %s FAIL\n", fields[1]);
     }
@@ -200,6 +202,7 @@ static void handle_unregister(int client_fd, char fields[][MAX_NAME], int field_
     send_code(client_fd, (uint8_t)result);
     if (result == 0) {
         printf("s> UNREGISTER %s OK\n",   fields[1]);
+        rpc_log(fields[1], "UNREGISTER", "");
     } else {
         printf("s> UNREGISTER %s FAIL\n", fields[1]);
     }
@@ -228,6 +231,7 @@ static void handle_connect(int client_fd, const char *client_ip,
         return;
     }
     printf("s> CONNECT %s OK\n", username);
+    rpc_log(username, "CONNECT", "");
 
     /* Cerramos el fd de la petición CONNECT para que el cliente Python pueda
        continuar y abrir su socket de escucha en el puerto indicado */
@@ -275,6 +279,7 @@ static void handle_disconnect(int client_fd, const char *client_ip,
     send_code(client_fd, (uint8_t)result);
     if (result == 0) {
         printf("s> DISCONNECT %s OK\n",   username);
+        rpc_log(username, "DISCONNECT", "");
     } else {
         printf("s> DISCONNECT %s FAIL\n", username);
     }
@@ -312,6 +317,7 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
     char msg_id_str[32];
     snprintf(msg_id_str, sizeof(msg_id_str), "%u", msg_id);
     (void)send(client_fd, msg_id_str, strlen(msg_id_str) + 1, 0);
+    rpc_log(sender, "SEND", "");
 
     /* Intentamos entrega inmediata si el receptor está conectado.
        Si falla, el mensaje se queda en la BD y se entregará cuando el receptor vuelva. */
@@ -359,6 +365,7 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
     }
 
     printf("s> CONNECTEDUSERS OK\n");
+    rpc_log(username, "USERS", "");
 }
 
 /* Función ejecutada por cada hilo: lee un comando del socket y lo despacha */

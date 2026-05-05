@@ -2,6 +2,8 @@ import socket
 import sys
 import threading
 
+import requests
+
 
 class Client:
     MAX_MSG_SIZE = 255
@@ -130,6 +132,19 @@ class Client:
             _, m_id = parts
             print(f"SEND MESSAGE {m_id} OK", end="\nc> ")
 
+    def _normalize_message(self, message: str) -> str:
+        try:
+            resp = requests.post(
+                'http://127.0.0.1:3000/quitar-espacios',
+                json={'cadena': message},
+                timeout=2
+            )
+            if resp.status_code == 200:
+                return resp.text
+        except Exception:
+            pass
+        return message
+
     def register(self, username: str):
         """
         Registra un usuario en el sistema.
@@ -238,6 +253,7 @@ class Client:
             print("c> SEND FAIL, USER NOT CONNECTED", file=sys.stderr)
             return
 
+        message = self._normalize_message(message)
         server_socket = self._get_connection()
         self._send(
             server_socket, f"SEND#{self._connected_user}#{username}#{message}"
