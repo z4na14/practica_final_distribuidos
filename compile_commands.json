@@ -1,0 +1,184 @@
+[
+  {
+    "file": "lib/sqlite/sqlite3.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-O3",
+      "-c",
+      "lib/sqlite/sqlite3.c",
+      "-o",
+      "build/sqlite3.o"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/sqlite3.o"
+  },
+  {
+    "file": "src/rpc/log_rpc_client.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O3",
+      "-D_DEFAULT_SOURCE",
+      "-I./lib",
+      "-I./src/inc",
+      "-I/usr/include/tirpc",
+      "-I./build",
+      "-c",
+      "src/rpc/log_rpc_client.c",
+      "-o",
+      "build/log_rpc_client.o"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/log_rpc_client.o"
+  },
+  {
+    "file": "src/rpc/log_rpc_clnt.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-O3",
+      "-I/usr/include/tirpc",
+      "-c",
+      "src/rpc/log_rpc_clnt.c",
+      "-o",
+      "build/log_rpc_clnt.o"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/log_rpc_clnt.o"
+  },
+  {
+    "file": "src/rpc/log_rpc_xdr.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-O3",
+      "-I/usr/include/tirpc",
+      "-c",
+      "src/rpc/log_rpc_xdr.c",
+      "-o",
+      "build/log_rpc_xdr.o"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/log_rpc_xdr.o"
+  },
+  {
+    "file": "src/server.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O3",
+      "-D_DEFAULT_SOURCE",
+      "-I./lib",
+      "-I./src/inc",
+      "-I/usr/include/tirpc",
+      "-I./build",
+      "src/server.c",
+      "-o",
+      "build/server"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/server"
+  },
+  {
+    "file": "src/users.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O3",
+      "-D_DEFAULT_SOURCE",
+      "-I./lib",
+      "-I./src/inc",
+      "-I/usr/include/tirpc",
+      "-I./build",
+      "src/users.c",
+      "-o",
+      "build/server"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/server"
+  },
+  {
+    "file": "src/tests.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O3",
+      "-D_DEFAULT_SOURCE",
+      "-I./lib",
+      "-I./src/inc",
+      "src/tests.c",
+      "-o",
+      "build/tests"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/tests"
+  },
+  {
+    "file": "src/users.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O3",
+      "-D_DEFAULT_SOURCE",
+      "-I./lib",
+      "-I./src/inc",
+      "src/users.c",
+      "-o",
+      "build/tests"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/tests"
+  },
+  {
+    "file": "src/rpc/log_rpc_svc.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-O3",
+      "-I/usr/include/tirpc",
+      "-c",
+      "src/rpc/log_rpc_svc.c",
+      "-o",
+      "build/log_rpc_svc.o"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/log_rpc_svc.o"
+  },
+  {
+    "file": "src/rpc/log_rpc_server.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c23",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-O3",
+      "-D_DEFAULT_SOURCE",
+      "-I./lib",
+      "-I./src/inc",
+      "-I/usr/include/tirpc",
+      "-I./build",
+      "src/rpc/log_rpc_server.c",
+      "-o",
+      "build/log_rpc_server"
+    ],
+    "directory": "/home/z4na14/Escritorio/Repos/UNI/practica_final_distribuidos",
+    "output": "build/log_rpc_server"
+  }
+]
