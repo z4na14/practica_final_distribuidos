@@ -102,6 +102,15 @@ class Client:
         elif codigo_op == "SEND_MESS_ACK" and len(parts) == 2:
             _, m_id = parts
             print(f"SEND MESSAGE {m_id} OK", end="\nc> ")
+        elif codigo_op == "SEND_MESSAGE_ATTACH":
+            pass
+        elif codigo_op == "SEND_MESS_ATTACH_ACK":
+            pass
+        elif codigo_op == "GETFILE":
+            pass
+
+    def _get_file(self):
+        pass
 
     def _normalize_message(self, message: str) -> str:
         try:
@@ -221,12 +230,32 @@ class Client:
         server_socket.close()
 
     def send_attach(self, username: str, message: str, filename: str):
-        if filename[0] != '/':
+        """
+        Envio de archivos adjuntos a otro cliente
+        """
+        if (filename[0] != '/'):
+            # Los paths tienen que ser absolutos
             print("c> SENDATTACH FAIL", file=sys.stderr)
             return
-
+        
         server_socket = self._get_connection()
+
         self._send(server_socket, f"SENDATTACH#{self._connected_user}#{username}#{message}#{filename}")
+        try:
+            response = self._recv_code(server_socket)
+            match response:
+                case 0:
+                    mid = self._recv_str(server_socket)
+                    print(f"c> SENDATTACH OK - MESSAGE {mid}")
+                case 1:
+                    print("c> SENDATTACH FAIL, USER DOES NOT EXIST", file=sys.stderr)
+                case _:
+                    print("c> SENDATTACH FAIL", file=sys.stderr)
+        except socket.timeout:
+            print("c> SENDATTACH FAIL", file=sys.stderr)
+
+        server_socket.close()
+        server_socket = None
 
     def users(self):
         server_socket = self._get_connection()

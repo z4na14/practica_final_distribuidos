@@ -293,15 +293,23 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
     }
 }
 
-static void handle_send_attached(int client_fd, char fields[][MAX_NAME], int field_count) {
-    if (field_count != 5) {
+static void handle_send_attached(/*int client_fd, char fields[][MAX_NAME], int field_count*/) {
+    /*if (field_count != 5) {
         send_code(client_fd, 2);
         return;
     }
 
-    (void)fields;
+    const char *sender   = fields[1];
+    const char *receiver = fields[2];
+    const char *message  = fields[3];
+    const char *filename = fields[4];*/
+
+    return;
 }
 
+/* Devuelve la lista de usuarios conectados en el momento de la consulta.
+   Solo pueden pedirla usuarios que estén ellos mismos conectados.
+   Devuelve 0 y el número de usuarios seguido de sus nombres, o 1/2 si hubo un error. */
 static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count) {
     if (field_count < 2) {
         send_code(client_fd, 2);
@@ -366,7 +374,7 @@ static void *handle_client(void *arg) {
         operation = 4;
     } else if (strcmp(message_fields[0], "SEND") == 0) {
         operation = 5;
-    } else if (strcmp(message_fields[0], "SENDATTACH") == 0) {
+    } else if (strcmp(message_fields[0], "SENDATTACH")) {
         operation = 6;
     } else if (strcmp(message_fields[0], "USERS") == 0) {
         operation = 7;
@@ -381,7 +389,7 @@ static void *handle_client(void *arg) {
             break;
         case 3:
             handle_connect(client_fd, client_ip, message_fields, field_count);
-            return NULL; // el fd lo cierra handle_connect
+            return NULL; /* el fd lo cierra handle_connect */
         case 4:
             handle_disconnect(client_fd, client_ip, message_fields, field_count);
             break;
@@ -389,7 +397,7 @@ static void *handle_client(void *arg) {
             handle_send(client_fd, message_fields, field_count);
             break;
         case 6:
-            handle_send_attached(client_fd, message_fields, field_count);
+            handle_send_attached();
             break;
         case 7:
             handle_users(client_fd, message_fields, field_count);
@@ -419,8 +427,8 @@ static int initialize_listening_sock(uint16_t port) {
         return -1;
     }
 
-    // SO_REUSEADDR evita bloquear el puerto en TIME_WAIT al reiniciar
-    const int reuse_opt = 1;
+    /* SO_REUSEADDR permite reutilizar el puerto inmediatamente tras reiniciar el servidor */
+    constexpr int reuse_opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse_opt, sizeof(reuse_opt));
 
     struct sockaddr_in server_addr = {0};
@@ -457,12 +465,13 @@ int main(const int argc, char *argv[]) {
 
     signal(SIGINT, sigint_handler);
 
-    if (initialize_listening_sock((uint16_t)atoi(argv[2])) < 0) {
+    const uint16_t listen_port = (uint16_t) atoi(argv[2]);
+    if (initialize_listening_sock(listen_port) < 0) {
         fprintf(stderr, "Error al inicializar el socket del servidor\n");
         return 1;
     }
 
-    printf("s> init server %s:%s\n", get_local_ip(), argv[2]);
+    printf("s> init server %s:%d\n", get_local_ip(), listen_port);
     printf("s> ");
     fflush(stdout);
 
@@ -470,7 +479,7 @@ int main(const int argc, char *argv[]) {
     socklen_t incoming_addr_len = sizeof(incoming_addr);
 
     while (1) {
-        ClientArg *client_arg = malloc(sizeof(ClientArg)); // liberado dentro del hilo
+        ClientArg *client_arg = malloc(sizeof(ClientArg)); // Liberado dentro del hilo
         if (!client_arg) { break; }
 
         client_arg->fd = accept(server_fd, (struct sockaddr *) &incoming_addr, &incoming_addr_len);

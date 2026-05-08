@@ -292,6 +292,27 @@ unsigned int msg_add(const char *receiver, const char *sender, const char *text)
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
+        "UPDATE users "
+        "SET msg_counter = CASE WHEN msg_counter >= 4294967295 THEN 0 "
+        "                       ELSE msg_counter + 1 END "
+        "WHERE name = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&db_mutex);
+        return 0;
+    }
+    sqlite3_bind_text(stmt, 1, receiver, -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    /* Si no se modificó ninguna fila, el receptor no existe */
+    if (rc != SQLITE_DONE || sqlite3_changes(db) == 0) {
+        pthread_mutex_unlock(&db_mutex);
+        return 0;
+    }
+
+    /* Leemos el valor actualizado del contador para saber qué ID usar */
+    rc = sqlite3_prepare_v2(db,
         "SELECT msg_counter FROM users WHERE name = ?;",
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
