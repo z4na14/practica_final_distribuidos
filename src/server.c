@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +36,7 @@ static int conn_deliver(const char *receiver, const char *sender,
     char message[MAX_NAME + MAX_MSG + 64];
     const size_t message_len = snprintf(message, sizeof(message), "SEND_MESSAGE#%s#%s#%s",
                                sender, msg_id_str, text);
-    if (message_len == 0 || message_len >= (int) sizeof(message)) {
+    if (message_len == 0 || message_len >= (int) sizeof(message) - 1) {
         return -1;
     }
     message[message_len] = '\0';
@@ -139,8 +140,10 @@ static int recv_msg(const int client_fd, char fields[][MAX_NAME]) {
     /* Partir el buffer por '#' y copiar cada trozo en su campo */
     int field_count = 0;
     char *cursor = raw_buf;
+    char *separator = NULL;
+
     while (field_count < MAX_MSG_FIELDS) {
-        char *separator = strchr(cursor, '#');
+        separator = strchr(cursor, '#');
         size_t field_len = separator ? (size_t) (separator - cursor) : strlen(cursor);
         if (field_len >= MAX_NAME) {
             field_len = MAX_NAME - 1;
@@ -324,6 +327,19 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
     }
 }
 
+static void handle_send_attached(int client_fd, char fields[][MAX_NAME], int field_count) {
+    if (field_count != 5) {
+        send_code(client_fd, 2);
+        return;
+    }
+
+    const char *sender   = fields[1];
+    const char *receiver = fields[2];
+    const char *message  = fields[3];
+    const char *filename = fields[4];
+  
+}
+
 /* Devuelve la lista de usuarios conectados en el momento de la consulta.
    Solo pueden pedirla usuarios que estén ellos mismos conectados.
    Devuelve 0 y el número de usuarios seguido de sus nombres, o 1/2 si hubo un error. */
@@ -384,26 +400,43 @@ static void *handle_client(void *arg) {
 
     /* El protocolo manda el comando como string, no como entero */
     int operation = -1;
-    if (strcmp(message_fields[0], "REGISTER") == 0) { operation = 1; } else if (
-        strcmp(message_fields[0], "UNREGISTER") == 0) { operation = 2; } else if (
-        strcmp(message_fields[0], "CONNECT") == 0) { operation = 3; } else if (
-        strcmp(message_fields[0], "DISCONNECT") == 0) { operation = 4; } else if (
-        strcmp(message_fields[0], "SEND") == 0) { operation = 5; } else if (strcmp(message_fields[0], "USERS") == 0) {
+    if (strcmp(message_fields[0], "REGISTER") == 0) {
+        operation = 1;
+    } else if (strcmp(message_fields[0], "UNREGISTER") == 0) {
+        operation = 2;
+    } else if (strcmp(message_fields[0], "CONNECT") == 0) {
+        operation = 3;
+    } else if (strcmp(message_fields[0], "DISCONNECT") == 0) {
+        operation = 4;
+    } else if (strcmp(message_fields[0], "SEND") == 0) {
+        operation = 5;
+    } else if (strcmp(message_fields[0], "SENDATTACH")) {
+        operation = 6;
+    } else if (strcmp(message_fields[0], "USERS") == 0) {
         operation = 7;
     }
 
     switch (operation) {
-        case 1: handle_register(client_fd, message_fields, field_count);
+        case 1:
+            handle_register(client_fd, message_fields, field_count);
             break;
-        case 2: handle_unregister(client_fd, message_fields, field_count);
+        case 2:
+            handle_unregister(client_fd, message_fields, field_count);
             break;
-        case 3: handle_connect(client_fd, client_ip, message_fields, field_count);
+        case 3:
+            handle_connect(client_fd, client_ip, message_fields, field_count);
             return NULL; /* el fd lo cierra handle_connect */
-        case 4: handle_disconnect(client_fd, client_ip, message_fields, field_count);
+        case 4:
+            handle_disconnect(client_fd, client_ip, message_fields, field_count);
             break;
-        case 5: handle_send(client_fd, message_fields, field_count);
+        case 5:
+            handle_send(client_fd, message_fields, field_count);
             break;
-        case 7: handle_users(client_fd, message_fields, field_count);
+        case 6:
+            handle_send_attached();
+            break;
+        case 7:
+            handle_users(client_fd, message_fields, field_count);
             break;
         default: break;
     }
@@ -423,25 +456,14 @@ static void sigint_handler(const int sig) {
     exit(0);
 }
 
-int main(const int argc, char *argv[]) {
-    if (argc != 3 || strcmp(argv[1], "-p") != 0) {
-        fprintf(stderr, "Uso: %s -p <puerto>\n", argv[0]);
-        return 1;
-    }
+static uint16_t initialize_listening_sock(uint16_t port) {
 
-    if (db_init() != 0) {
-        fprintf(stderr, "Error al inicializar la base de datos\n");
-        return 1;
-    }
-
-    signal(SIGINT, sigint_handler);
-
-    const uint16_t listen_port = (uint16_t) atoi(argv[2]);
+    const uint16_t listen_port = port;
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         perror("Error al inicializar el socket");
         db_close();
-        return 1;
+        return -1;
     }
 
     /* SO_REUSEADDR permite reutilizar el puerto inmediatamente tras reiniciar el servidor */
@@ -457,12 +479,34 @@ int main(const int argc, char *argv[]) {
         perror("bind");
         close(server_fd);
         db_close();
-        return 1;
+        return -1;
     }
     if (listen(server_fd, 10) < 0) {
         perror("listen");
         close(server_fd);
         db_close();
+        return -1;
+    }
+
+    return 0;
+}
+
+int main(const int argc, char *argv[]) {
+    if (argc != 3 || strcmp(argv[1], "-p") != 0) {
+        fprintf(stderr, "Uso: %s -p <puerto>\n", argv[0]);
+        return 1;
+    }
+
+    if (db_init() != 0) {
+        fprintf(stderr, "Error al inicializar la base de datos\n");
+        return 1;
+    }
+
+    signal(SIGINT, sigint_handler);
+
+    const uint16_t listen_port = initialize_listening_sock((uint16_t)atoi(argv[2])); 
+    if (listen_port < 0) {
+        fprintf(stderr, "Error al inicializar el socket del servidor\n");
         return 1;
     }
 
@@ -475,7 +519,7 @@ int main(const int argc, char *argv[]) {
 
     /* Bucle principal: aceptar conexiones y lanzar un hilo por cada una */
     while (1) {
-        ClientArg *client_arg = malloc(sizeof(ClientArg));
+        ClientArg *client_arg = malloc(sizeof(ClientArg)); // Liberado dentro del hilo
         if (!client_arg) { break; }
 
         client_arg->fd = accept(server_fd, (struct sockaddr *) &incoming_addr, &incoming_addr_len);

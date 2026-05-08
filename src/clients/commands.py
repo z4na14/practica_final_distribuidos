@@ -280,9 +280,18 @@ class Client:
         server_socket.close()
         server_socket = None
 
-    def send_attach(self):
-        """Funcionalidad de envío de archivos adjuntos - Parte 2 de la práctica"""
-        pass
+    def send_attach(self, username: str, message: str, filename: str):
+        """
+        Envio de archivos adjuntos a otro cliente
+        """
+        if (filename[0] != '/'):
+            # Los paths tienen que ser absolutos
+            print("c> SENDATTACH FAIL", file=sys.stderr)
+            return
+        
+        server_socket = self._get_connection
+
+        self._send(server_socket, f"SENDATTACH#{self._connected_user}#{username}#{message}#{filename}")
 
     def users(self):
         """
