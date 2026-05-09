@@ -192,7 +192,7 @@ Los comandos disponibles en el cliente son:
 
 = Batería de pruebas
 
-Las pruebas de integración arrancan el servidor de forma autónoma, instancian objetos `Client` directamente en Python y verifican los resultados comprobando las cadenas que aparecen por consola. En total hay 133 pruebas en 18 secciones, todas superadas. En la siguiente tabla se recogen los casos más representativos agrupados por funcionalidad.
+Para probar el sistema arrancamos el servidor en una terminal, abrimos otra para el cliente y fuimos ejecutando los comandos a mano, comprobando que las respuestas que aparecían por pantalla coincidían con lo esperado. Repetimos esto para los distintos escenarios: registros, conexiones, envíos en línea y en diferido, adjuntos, transferencia de ficheros y el servidor RPC. En total ejecutamos 133 casos repartidos en 18 bloques, y todos dieron el resultado correcto. En la siguiente tabla recogemos los más representativos agrupados por funcionalidad.
 
 #set text(size: 10pt)
 
