@@ -4,14 +4,8 @@ from commands import Client
 
 
 def read_input(client: Client):
-    print("c> ", end="")
     while True:
-        curr_line = input()
-
-        # En caso de tener una linea vacia, reimprimir la cadena inicial
-        if not curr_line.strip():
-            print("c> ", end="")
-            continue
+        curr_line = input("\rc> ")
 
         curr_command = curr_line.split(" ", 3)
         if curr_command[0] == "QUIT":
@@ -72,7 +66,9 @@ def read_input(client: Client):
                 )
                 continue
             client.get_file(curr_command[1], curr_command[2], curr_command[3])
-
+            
+        else: 
+            print("c> ", end="")
 
 def parse_args():
     if len(sys.argv) != 5:

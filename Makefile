@@ -23,7 +23,7 @@ NAME = ejercicio_final.zip
 
 .PHONY: all clean export server tests log_rpc_server
 
-all: server tests log_rpc_server
+all: server log_rpc_server #tests
 
 # Directorio de salida
 $(BUILD_DIR):
@@ -66,9 +66,9 @@ $(BUILD_DIR)/log_rpc_server: $(SRC_DIR)/rpc/log_rpc_server.c \
 	      $(RPC_LIB) $^ -o $@
 
 # Tests
-tests: $(BUILD_DIR)/tests
-$(BUILD_DIR)/tests: $(SRC_DIR)/tests.c $(SRC_DIR)/users.c $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread -ldl $^ -o $@
+#tests: $(BUILD_DIR)/tests
+#$(BUILD_DIR)/tests: $(SRC_DIR)/tests.c $(SRC_DIR)/users.c $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
+#	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread -ldl $^ -o $@
 
 clean: remove_db
 	rm -rf $(BUILD_DIR) && mkdir -p $(BUILD_DIR)

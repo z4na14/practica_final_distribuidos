@@ -25,13 +25,22 @@ typedef struct {
 
 // entrega el mensaje al receptor, lo borra de la BD y envía el ACK al emisor
 static int conn_deliver(const char *receiver, const char *sender,
-                        const unsigned int msg_id, const char *text) {
+                        const unsigned int msg_id, const char *text, const char *filename) {
     char msg_id_str[32];
     snprintf(msg_id_str, sizeof(msg_id_str), "%u", msg_id);
 
-    char message[MAX_NAME + MAX_MSG + 64];
-    size_t message_len = snprintf(message, sizeof(message), "SEND_MESSAGE#%s#%s#%s",
+    char message[MAX_NAME + MAX_MSG + 512];
+    size_t message_len;
+    
+    // Verificamos si hay un archivo adjunto
+    if (filename && strlen(filename) > 0) {
+        message_len = snprintf(message, sizeof(message), "SEND_MESSAGE_ATTACH#%s#%s#%s#%s",
+                               sender, msg_id_str, text, filename);
+    } else {
+        message_len = snprintf(message, sizeof(message), "SEND_MESSAGE#%s#%s#%s",
                                sender, msg_id_str, text);
+    }
+
     if (message_len == 0 || message_len >= (int) sizeof(message) - 1) {
         return -1;
     }
@@ -68,11 +77,23 @@ static int conn_deliver(const char *receiver, const char *sender,
         return -1;
     }
 
-    printf("s> SEND MESSAGE %u FROM %s TO %s\n", msg_id, sender, receiver);
+    if (filename && strlen(filename) > 0) {
+        printf("s> SEND MESSAGE ATTACH %u FROM %s TO %s\n", msg_id, sender, receiver);
+    } else {
+        printf("s> SEND MESSAGE %u FROM %s TO %s\n", msg_id, sender, receiver);
+    }
+    
     msg_delete(receiver, msg_id);
 
-    char ack_message[64];
-    size_t ack_len = snprintf(ack_message, sizeof(ack_message), "SEND_MESS_ACK#%s", msg_id_str);
+    // Preparación del ACK para el cliente remitente
+    char ack_message[256];
+    size_t ack_len;
+    if (filename && strlen(filename) > 0) {
+        ack_len = snprintf(ack_message, sizeof(ack_message), "SEND_MESS_ATTACH_ACK#%s#%s", msg_id_str, filename);
+    } else {
+        ack_len = snprintf(ack_message, sizeof(ack_message), "SEND_MESS_ACK#%s", msg_id_str);
+    }
+
     if (ack_len <= 0 || ack_len >= (int) sizeof(ack_message)) {
         return 0; // el ACK es best-effort; el mensaje ya fue entregado
     }
@@ -222,8 +243,10 @@ static void handle_connect(int client_fd, const char *client_ip,
     unsigned int msg_id;
     char pending_sender[MAX_NAME];
     char pending_text[MAX_MSG];
-    while (msg_get_next(username, &msg_id, pending_sender, pending_text) == 0) {
-        if (conn_deliver(username, pending_sender, msg_id, pending_text) < 0) {
+    char pending_filename[MAX_MSG];
+
+    while (msg_get_next(username, &msg_id, pending_sender, pending_text, pending_filename) == 0) {
+        if (conn_deliver(username, pending_sender, msg_id, pending_text, pending_filename) < 0) {
             break;
         }
     }
@@ -276,7 +299,7 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
         return;
     }
 
-    unsigned int msg_id = msg_add(receiver, sender, text);
+    unsigned int msg_id = msg_add(receiver, sender, text, NULL);
     if (msg_id == 0) {
         send_code(client_fd, 2);
         return;
@@ -288,7 +311,7 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
     send(client_fd, msg_id_str, strlen(msg_id_str) + 1, 0);
     rpc_log(sender, "SEND", "");
 
-    if (conn_deliver(receiver, sender, msg_id, text) < 0) {
+    if (conn_deliver(receiver, sender, msg_id, text, NULL) < 0) {
         printf("s> MESSAGE %u FROM %s TO %s STORED\n", msg_id, sender, receiver);
     }
 }
@@ -303,7 +326,6 @@ static void handle_send_attached(int client_fd, char fields[][MAX_NAME], int fie
     const char *text = fields[3];
     const char *filename = fields[4];
 
-    // solo necesitamos comprobar si el usuario existe
     char unused_ip[16];
     uint16_t unused_port;
     if (user_get_conn_info(receiver, unused_ip, &unused_port) == 1) {
@@ -311,7 +333,7 @@ static void handle_send_attached(int client_fd, char fields[][MAX_NAME], int fie
         return;
     }
 
-    unsigned int msg_id = msg_add(receiver, sender, text);
+    unsigned int msg_id = msg_add(receiver, sender, text, filename);
     if (msg_id == 0) {
         send_code(client_fd, 2);
         return;
@@ -323,7 +345,7 @@ static void handle_send_attached(int client_fd, char fields[][MAX_NAME], int fie
     send(client_fd, msg_id_str, strlen(msg_id_str) + 1, 0);
     rpc_log(sender, "SENDATTACH", filename);
 
-    if (conn_deliver(receiver, sender, msg_id, text) < 0) {
+    if (conn_deliver(receiver, sender, msg_id, text, filename) < 0) {
         printf("s> MESSAGE %u FROM %s TO %s STORED\n", msg_id, sender, receiver);
     }
 }

@@ -39,8 +39,8 @@ int users_get_connected(char (*names)[MAX_NAME], int max);
  *   msg_get_next : 0=encontrado (rellena id/sender/text), 1=sin mensajes, -1=error
  *   msg_delete   : 0=ok, -1=error
  */
-unsigned int msg_add(const char *receiver, const char *sender, const char *text);
-int msg_get_next(const char *receiver, unsigned int *id, char *sender, char *text);
+unsigned int msg_add(const char *receiver, const char *sender, const char *text, const char *filename);
+int msg_get_next(const char *receiver, unsigned int *id, char *sender, char *text, char *filename);
 int msg_delete(const char *receiver, unsigned int id);
 
 #endif /* USERS_H */

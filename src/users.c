@@ -41,7 +41,8 @@ int db_init(void) {
         "  id       INTEGER NOT NULL,"
         "  sender   TEXT    NOT NULL,"
         "  receiver TEXT    NOT NULL,"
-        "  message  TEXT    NOT NULL"
+        "  message  TEXT    NOT NULL,"
+        "  filename TEXT    DEFAULT NULL"
         ");",
         NULL, NULL, &errmsg);
     if (rc != SQLITE_OK) {
@@ -287,7 +288,7 @@ int users_get_connected(char (*names)[MAX_NAME], int max) {
     return count;
 }
 
-unsigned int msg_add(const char *receiver, const char *sender, const char *text) {
+unsigned int msg_add(const char *receiver, const char *sender, const char *text, const char *filename) {
     pthread_mutex_lock(&db_mutex);
 
     sqlite3_stmt *stmt = NULL;
@@ -347,9 +348,10 @@ unsigned int msg_add(const char *receiver, const char *sender, const char *text)
         return 0;
     }
 
+    // MODIFICADO: Insertamos el 'filename'
     rc = sqlite3_prepare_v2(db,
-        "INSERT INTO messages (id, sender, receiver, message) "
-        "VALUES (?, ?, ?, ?);",
+        "INSERT INTO messages (id, sender, receiver, message, filename) "
+        "VALUES (?, ?, ?, ?, ?);",
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         pthread_mutex_unlock(&db_mutex);
@@ -359,6 +361,14 @@ unsigned int msg_add(const char *receiver, const char *sender, const char *text)
     sqlite3_bind_text(stmt, 2, sender, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 3, receiver, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 4, text, -1, SQLITE_STATIC);
+    
+    // Asignación de NULO si no existe el fichero
+    if (filename && strlen(filename) > 0) {
+        sqlite3_bind_text(stmt, 5, filename, -1, SQLITE_STATIC);
+    } else {
+        sqlite3_bind_null(stmt, 5);
+    }
+    
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 
@@ -366,13 +376,12 @@ unsigned int msg_add(const char *receiver, const char *sender, const char *text)
     return (rc == SQLITE_DONE) ? new_id : 0;
 }
 
-// no borra el mensaje; el caller llama a msg_delete tras entrega exitosa
-int msg_get_next(const char *receiver, unsigned int *id, char *sender, char *text) {
+int msg_get_next(const char *receiver, unsigned int *id, char *sender, char *text, char *filename) {
     pthread_mutex_lock(&db_mutex);
 
     sqlite3_stmt *stmt = NULL;
     int rc = sqlite3_prepare_v2(db,
-        "SELECT id, sender, message FROM messages WHERE receiver = ? LIMIT 1;",
+        "SELECT id, sender, message, filename FROM messages WHERE receiver = ? LIMIT 1;",
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         pthread_mutex_unlock(&db_mutex);
@@ -391,8 +400,11 @@ int msg_get_next(const char *receiver, unsigned int *id, char *sender, char *tex
 
     const char *s = (const char *)sqlite3_column_text(stmt, 1);
     const char *m = (const char *)sqlite3_column_text(stmt, 2);
+    const char *f = (const char *)sqlite3_column_text(stmt, 3);
+
     if (sender) { strncpy(sender, s ? s : "", MAX_NAME - 1); sender[MAX_NAME - 1] = '\0'; }
     if (text) { strncpy(text, m ? m : "", MAX_MSG - 1); text[MAX_MSG - 1] = '\0'; }
+    if (filename) { strncpy(filename, f ? f : "", MAX_MSG - 1); filename[MAX_MSG - 1] = '\0'; }
 
     sqlite3_finalize(stmt);
     pthread_mutex_unlock(&db_mutex);
