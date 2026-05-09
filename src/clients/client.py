@@ -65,7 +65,13 @@ def read_input(client: Client):
             client.users()
 
         elif curr_command[0] == "GETFILE":
-            pass
+            if len(curr_command) < 4:
+                print(
+                    "INVALID COMMAND: GETFILE <userName> <remoteFileName> <localFileName>",
+                    file=sys.stderr,
+                )
+                continue
+            client.get_file(curr_command[1], curr_command[2], curr_command[3])
 
 
 def parse_args():

@@ -70,8 +70,9 @@ tests: $(BUILD_DIR)/tests
 $(BUILD_DIR)/tests: $(SRC_DIR)/tests.c $(SRC_DIR)/users.c $(BUILD_DIR)/sqlite3.o | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread -ldl $^ -o $@
 
-clean:
+clean: remove_db
 	rm -rf $(BUILD_DIR) && mkdir -p $(BUILD_DIR)
+remove_db:
 	rm -f $(TEST_DIR)/db.sqlite ./db.sqlite
 
 export: clean

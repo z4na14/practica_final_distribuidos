@@ -17,6 +17,7 @@ class Client:
         self._listening_thread = None
         self._terminate = False
         self._connected_user = None
+        self._connected_users_info = {}
 
     def _get_connection(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -106,32 +107,106 @@ class Client:
             return
 
         codigo_op = parts[0]
+
         if codigo_op == "SEND_MESSAGE" and len(parts) == 4:
             _, sender, m_id, text = parts
-            print(
-                f"\rc> MESSAGE {m_id} FROM {sender}\n\t{text}\n\tEND",
-                end="\nc> ",
-            )
+            print(f"\rc> MESSAGE {m_id} FROM {sender}\n\t{text}\n\tEND", end="\nc> ")
         elif codigo_op == "SEND_MESS_ACK" and len(parts) == 2:
             _, m_id = parts
             print(f"\rc> SEND MESSAGE {m_id} OK", end="\nc> ")
-        elif codigo_op == "SEND_MESSAGE_ATTACH" and len(parts) == 5:
-            _, sender, m_id, text, file_name = parts
-            print(
-                f"\rc> MESSAGE {m_id} FROM {sender}\n\t{text}\n\tEND\n\tFILE {file_name}",
-                end="\nc> ",
-            )
+        elif codigo_op == "SEND_MESSAGE_ATTACH":
+            # Using custom split for the ATTACH to avoid the limit of 3 splits
+            attach_parts = message.split("#", 4)
+            if len(attach_parts) == 5:
+                _, sender, m_id, text, file_name = attach_parts
+                print(
+                    f"\rc> MESSAGE {m_id} FROM {sender}\n\t{text}\n\tEND\n\tFILE {file_name}",
+                    end="\nc> ",
+                )
         elif codigo_op == "SEND_MESS_ATTACH_ACK" and len(parts) == 3:
             _, m_id, file_name = parts
             print(f"\rc> SEND MESSAGE {m_id} {file_name} OK", end="\nc> ")
+
         elif codigo_op == "GETFILE":
+            getfile_parts = message.split("#", 4)
+            if len(getfile_parts) == 5:
+                _, requester, filename, req_ip, req_port = getfile_parts
+                # Lanza el hilo de envio de archivo, enviando al IP/puerto del que lo pidió
+                threading.Thread(
+                    target=self._handle_send_file,
+                    args=(filename, req_ip, int(req_port)),
+                ).start()
+
+    def _handle_send_file(self, filename: str, target_ip: str, target_port: int):
+        """
+        Hilo responsable de enviar el fichero por bloques al usuario solicitante.
+        """
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((target_ip, target_port))
+            with open(filename, "rb") as f:
+                while True:
+                    chunk = f.read(4096)
+                    if not chunk:
+                        break
+                    sock.sendall(chunk)
+            sock.close()
+        except Exception:
             pass
 
-    def _handle_get_file():
-        pass
+    def _handle_get_file(self, recv_socket: socket.socket, local_filename: str):
+        """
+        Hilo responsable de recibir un fichero y guardarlo de forma local.
+        """
+        try:
+            recv_socket.listen()
+            recv_socket.settimeout(self.TIMEOUT)
+            conn, _ = recv_socket.accept()
+            with open(local_filename, "wb") as f:
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            conn.close()
+            recv_socket.close()
+            print(f"\rc> GETFILE OK", end="\nc> ")
+        except Exception:
+            print(f"\rc> GETFILE FAIL", file=sys.stderr, end="\nc> ")
+            recv_socket.close()
 
-    def _handle_send_file():
-        pass
+    def _update_users_info(self):
+        """
+        Solicitud interna de usuarios para refrescar la IP y el puerto de cada uno.
+        """
+        server_socket = self._get_connection()
+        username = self._connected_user if self._connected_user else ""
+        self._send(server_socket, f"USERS#{username}")
+
+        self._connected_users_info = {}
+        try:
+            response = self._recv_code(server_socket)
+            if response == 0:
+                count = int(self._recv_str(server_socket))
+                for _ in range(count):
+                    user_info = self._recv_str(server_socket)
+
+                    parts = [p.strip() for p in user_info.replace(":", " ").split()]
+                    if len(parts) >= 3:
+                        u_name = parts[0]
+                        if parts[1].isdigit():
+                            port = int(parts[1])
+                            ip = parts[2]
+                        elif parts[2].isdigit():
+                            port = int(parts[2])
+                            ip = parts[1]
+                        else:
+                            continue
+                        self._connected_users_info[u_name] = (ip, port)
+        except socket.timeout:
+            pass
+        finally:
+            server_socket.close()
 
     def _normalize_message(self, message: str) -> str:
         try:
@@ -306,6 +381,7 @@ class Client:
 
         username = self._connected_user if self._connected_user else ""
         self._send(server_socket, f"USERS#{username}")
+        self._connected_users_info = {}
 
         try:
             response = self._recv_code(server_socket)
@@ -314,26 +390,88 @@ class Client:
                     count = int(self._recv_str(server_socket))
                     out = f"c> CONNECTED USERS ({count} users connected) OK"
                     for _ in range(count):
-                        user = self._recv_str(server_socket)
-                        out += f"\n\t{user}"
+                        user_info = self._recv_str(server_socket)
+                        out += f"\n\t{user_info}"
+                        
+                        # Extraer y guardar en memoria de forma robusta
+                        parts = [p.strip() for p in user_info.replace(":", " ").split()]
+                        if len(parts) >= 3:
+                            u_name = parts[0]
+                            if parts[1].isdigit():
+                                port = int(parts[1])
+                                ip = parts[2]
+                            elif parts[2].isdigit():
+                                port = int(parts[2])
+                                ip = parts[1]
+                            else:
+                                continue
+                            self._connected_users_info[u_name] = (ip, port)
+                            
                     print(out, end="\nc> ")
                 case 1:
-                    print(
-                        "c> CONNECTED USERS FAIL, USER IS NOT CONNECTED",
-                        end="\nc> ",
-                        file=sys.stderr,
-                    )
+                    print("c> CONNECTED USERS FAIL, USER IS NOT CONNECTED", end="\nc> ", file=sys.stderr)
                 case _:
                     print("c> CONNECTED USERS FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
             print("c> CONNECTED USERS FAIL", file=sys.stderr, end="\nc> ")
 
         server_socket.close()
-
+        
     def quit(self):
         if self._connected_user:
             self.disconnect(self._connected_user)
         sys.exit(0)
 
-    def get_file(self):
-        pass
+    def get_file(self, username: str, remote_filename: str, local_filename: str):
+        if not self._connected_user:
+            print("c> GETFILE FAIL", file=sys.stderr, end="\nc> ")
+            return
+
+        # Refrescar listado si el usuario no se encuentra en el listado local cacheado
+        if username not in self._connected_users_info:
+            self._update_users_info()
+
+        if username not in self._connected_users_info:
+            print(
+                "c> FILE TRANSFER FAILED, user not connected.",
+                file=sys.stderr,
+                end="\nc> ",
+            )
+            return
+
+        sender_ip, sender_port = self._connected_users_info[username]
+
+        recv_socket = None
+
+        try:
+            recv_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            recv_socket.bind(("", 0))
+            my_port = recv_socket.getsockname()[1]
+
+            # Obtener nuestra IP de red local usada para contactar el servidor
+            temp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                temp_sock.connect((self._server_address, self._server_main_port))
+                my_ip = temp_sock.getsockname()[0]
+            except Exception:
+                my_ip = "127.0.0.1"
+            finally:
+                temp_sock.close()
+
+            thread = threading.Thread(
+                target=self._handle_get_file, args=(recv_socket, local_filename)
+            )
+            thread.start()
+
+            req_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            req_socket.settimeout(self.TIMEOUT)
+            req_socket.connect((sender_ip, sender_port))
+
+            msg = f"GETFILE#{self._connected_user}#{remote_filename}#{my_ip}#{my_port}"
+            self._send(req_socket, msg)
+            req_socket.close()
+
+        except Exception:
+            print("c> GETFILE FAIL", file=sys.stderr, end="\nc> ")
+            if recv_socket:
+                recv_socket.close()
