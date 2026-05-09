@@ -23,6 +23,7 @@ typedef struct {
     char ip[16];
 } ClientArg;
 
+// entrega el mensaje al receptor, lo borra de la BD y envía el ACK al emisor
 static int conn_deliver(const char *receiver, const char *sender,
                         const unsigned int msg_id, const char *text) {
     char msg_id_str[32];
@@ -104,6 +105,7 @@ static void send_code(const int client_fd, const uint8_t code) {
     send(client_fd, &code, 1, 0);
 }
 
+// lee el mensaje hasta '\0' y lo divide por '#' en fields; devuelve el número de campos
 static int recv_msg(const int client_fd, char fields[][MAX_NAME]) {
     char raw_buf[MAX_NAME * 3 + 64];
     int bytes_read = 0;
@@ -190,6 +192,7 @@ static void handle_unregister(int client_fd, char fields[][MAX_NAME], int field_
     }
 }
 
+// cierra el fd antes de entregar pendientes para que el cliente tenga tiempo de abrir su socket
 static void handle_connect(int client_fd, const char *client_ip,
                            char fields[][MAX_NAME], int field_count) {
     if (field_count < 3) {
