@@ -293,23 +293,44 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
     }
 }
 
-static void handle_send_attached(/*int client_fd, char fields[][MAX_NAME], int field_count*/) {
-    /*if (field_count != 5) {
+static void handle_send_attached(int client_fd, char fields[][MAX_NAME], int field_count) {
+    if (field_count < 5) {
+        send_code(client_fd, 2);
+        return;
+    }
+    const char *sender = fields[1];
+    const char *receiver = fields[2];
+    const char *text = fields[3];
+    const char *filename = fields[4];
+
+    // solo necesitamos comprobar si el usuario existe
+    char unused_ip[16];
+    uint16_t unused_port;
+    if (user_get_conn_info(receiver, unused_ip, &unused_port) == 1) {
+        send_code(client_fd, 1);
+        return;
+    }
+
+    unsigned int msg_id = msg_add(receiver, sender, text);
+    if (msg_id == 0) {
         send_code(client_fd, 2);
         return;
     }
 
-    const char *sender   = fields[1];
-    const char *receiver = fields[2];
-    const char *message  = fields[3];
-    const char *filename = fields[4];*/
+    send_code(client_fd, 0);
+    char msg_id_str[32];
+    snprintf(msg_id_str, sizeof(msg_id_str), "%u", msg_id);
+    send(client_fd, msg_id_str, strlen(msg_id_str) + 1, 0);
+    rpc_log(sender, "SENDATTACH", filename);
 
-    return;
+    if (conn_deliver(receiver, sender, msg_id, text) < 0) {
+        printf("s> MESSAGE %u FROM %s TO %s STORED\n", msg_id, sender, receiver);
+    }
 }
 
 /* Devuelve la lista de usuarios conectados en el momento de la consulta.
    Solo pueden pedirla usuarios que estén ellos mismos conectados.
-   Devuelve 0 y el número de usuarios seguido de sus nombres, o 1/2 si hubo un error. */
+   Devuelve 0 y el número de usuarios seguido de sus nombres junto con IP y puerto, o 1/2 si hubo un error. */
 static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count) {
     if (field_count < 2) {
         send_code(client_fd, 2);
@@ -340,8 +361,18 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
     char count_str[16];
     snprintf(count_str, sizeof(count_str), "%d", user_count);
     send(client_fd, count_str, strlen(count_str) + 1, 0);
+
+    // Para cada usuario conectado, enviamos: usuario::IP::puerto
     for (int i = 0; i < user_count; i++) {
-        send(client_fd, connected_names[i], strlen(connected_names[i]) + 1, 0);
+        char user_ip[16];
+        uint16_t user_port;
+
+        if (user_get_conn_info(connected_names[i], user_ip, &user_port) == 0) {
+            char user_info[MAX_NAME + 32]; // Padding extra de 32 bytes para el resto de la cadena
+            snprintf(user_info, sizeof(user_info), "%.*s::%.15s::%u", // Que loco el formateo de variables
+                     MAX_NAME, connected_names[i], user_ip, user_port);
+            send(client_fd, user_info, strlen(user_info) + 1, 0);
+        }
     }
 
     printf("s> CONNECTEDUSERS OK\n");
@@ -374,7 +405,7 @@ static void *handle_client(void *arg) {
         operation = 4;
     } else if (strcmp(message_fields[0], "SEND") == 0) {
         operation = 5;
-    } else if (strcmp(message_fields[0], "SENDATTACH")) {
+    } else if (strcmp(message_fields[0], "SENDATTACH") == 0) {
         operation = 6;
     } else if (strcmp(message_fields[0], "USERS") == 0) {
         operation = 7;
@@ -397,7 +428,7 @@ static void *handle_client(void *arg) {
             handle_send(client_fd, message_fields, field_count);
             break;
         case 6:
-            handle_send_attached();
+            handle_send_attached(client_fd, message_fields, field_count);
             break;
         case 7:
             handle_users(client_fd, message_fields, field_count);
@@ -428,7 +459,7 @@ static int initialize_listening_sock(uint16_t port) {
     }
 
     /* SO_REUSEADDR permite reutilizar el puerto inmediatamente tras reiniciar el servidor */
-    constexpr int reuse_opt = 1;
+    const int reuse_opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse_opt, sizeof(reuse_opt));
 
     struct sockaddr_in server_addr = {0};

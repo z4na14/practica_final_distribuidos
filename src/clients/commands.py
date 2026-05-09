@@ -57,7 +57,7 @@ class Client:
 
             match response:
                 case 0:
-                    print("c> CONNECT OK")
+                    print("CONNECT OK", end="\nc> ")
                     self._connected_user = username
 
                     with socket.socket(
@@ -65,7 +65,9 @@ class Client:
                     ) as msg_lst_socket:
                         msg_lst_socket.bind(("0.0.0.0", self._client_port))
                         msg_lst_socket.listen()
-                        msg_lst_socket.settimeout(self.TIMEOUT)  # para poder comprobar _terminate; sin esto accept() bloquea indefinidamente
+                        msg_lst_socket.settimeout(
+                            self.TIMEOUT
+                        )  # para poder comprobar _terminate; sin esto accept() bloquea indefinidamente
 
                         while not self._terminate:
                             try:
@@ -78,13 +80,17 @@ class Client:
                                 continue
 
                 case 1:
-                    print("c> CONNECT FAIL, USER DOES NOT EXIST", file=sys.stderr)
+                    print(
+                        "CONNECT FAIL, USER DOES NOT EXIST",
+                        file=sys.stderr,
+                        end="\nc> ",
+                    )
                 case 2:
-                    print("c> USER ALREADY CONNECTED", file=sys.stderr)
+                    print("USER ALREADY CONNECTED", file=sys.stderr, end="\nc> ")
                 case _:
-                    print("c> CONNECT FAIL", file=sys.stderr)
+                    print("CONNECT FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
-            print("c> CONNECT FAIL", file=sys.stderr)
+            print("CONNECT FAIL", file=sys.stderr, end="\nc> ")
 
         self._terminate = False
         self._connected_user = None
@@ -102,22 +108,27 @@ class Client:
         elif codigo_op == "SEND_MESS_ACK" and len(parts) == 2:
             _, m_id = parts
             print(f"SEND MESSAGE {m_id} OK", end="\nc> ")
-        elif codigo_op == "SEND_MESSAGE_ATTACH":
-            pass
-        elif codigo_op == "SEND_MESS_ATTACH_ACK":
-            pass
+        elif codigo_op == "SEND_MESSAGE_ATTACH" and len(parts) == 5:
+            _, sender, m_id, text, file_name = parts
+            print(
+                f"MESSAGE {m_id} FROM {sender}\n\t{text}\n\tEND\n\tFILE {file_name}",
+                end="\nc> ",
+            )
+        elif codigo_op == "SEND_MESS_ATTACH_ACK" and len(parts) == 3:
+            _, m_id, file_name = parts
+            print(f"SEND MESSAGE {m_id} {file_name} OK", end="\nc> ")
         elif codigo_op == "GETFILE":
             pass
 
-    def _get_file(self):
+    def _handle_get_file(self):
         pass
 
     def _normalize_message(self, message: str) -> str:
         try:
             resp = requests.post(
-                f'http://{self._server_address}:{self._server_ws_port}/quitar-espacios',
-                json={'cadena': message},
-                timeout=2
+                f"http://{self._server_address}:{self._server_ws_port}/quitar-espacios",
+                json={"cadena": message},
+                timeout=2,
             )
             if resp.status_code == 200:
                 return resp.text
@@ -151,19 +162,19 @@ class Client:
             response = self._recv_code(server_socket)
             match response:
                 case 0:
-                    print("c> UNREGISTER OK")
+                    print("UNREGISTER OK", end="\nc> ")
                 case 1:
-                    print("c> USER DOES NOT EXIST", file=sys.stderr)
+                    print("USER DOES NOT EXIST", file=sys.stderr, end="\nc> ")
                 case _:
-                    print("c> UNREGISTER FAIL", file=sys.stderr)
+                    print("UNREGISTER FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
-            print("c> UNREGISTER FAIL", file=sys.stderr)
+            print("UNREGISTER FAIL", file=sys.stderr, end="\nc> ")
 
         server_socket.close()
 
     def connect(self, username: str):
         if self._listening_thread:
-            print("c> CONNECT FAIL, USER ALREADY CONNECTED", file=sys.stderr)
+            print("CONNECT FAIL, USER ALREADY CONNECTED", file=sys.stderr, end="\nc> ")
             return
 
         self._listening_thread = threading.Thread(
@@ -173,7 +184,7 @@ class Client:
 
     def disconnect(self, username: str):
         if not self._listening_thread:
-            print("c> DISCONNECT FAIL, USER NOT CONNECTED", file=sys.stderr)
+            print("DISCONNECT FAIL, USER NOT CONNECTED", file=sys.stderr, end="\nc> ")
             return
 
         server_socket = self._get_connection()
@@ -183,19 +194,27 @@ class Client:
             response = self._recv_code(server_socket)
             match response:
                 case 0:
-                    print("c> DISCONNECT OK")
+                    print("DISCONNECT OK", end="\nc> ")
                     self._terminate = True
                     self._connected_user = None
                     self._listening_thread.join()
                     self._listening_thread = None
                 case 1:
-                    print("c> DISCONNECT FAIL, USER DOES NOT EXIST", file=sys.stderr)
+                    print(
+                        "DISCONNECT FAIL, USER DOES NOT EXIST",
+                        file=sys.stderr,
+                        end="\nc> ",
+                    )
                 case 2:
-                    print("c> DISCONNECT FAIL, USER NOT CONNECTED", file=sys.stderr)
+                    print(
+                        "DISCONNECT FAIL, USER NOT CONNECTED",
+                        file=sys.stderr,
+                        end="\nc> ",
+                    )
                 case _:
-                    print("c> DISCONNECT FAIL", file=sys.stderr)
+                    print("DISCONNECT FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
-            print("c> DISCONNECT FAIL", file=sys.stderr)
+            print("DISCONNECT FAIL", file=sys.stderr, end="\nc> ")
             self._terminate = True  # aunque el servidor no responda, cerramos el hilo
             if self._listening_thread:
                 self._listening_thread.join()
@@ -205,27 +224,27 @@ class Client:
 
     def send(self, username: str, message: str):
         if not self._connected_user:
-            print("c> SEND FAIL, USER NOT CONNECTED", file=sys.stderr)
+            print("SEND FAIL, USER NOT CONNECTED", file=sys.stderr, end="\nc> ")
             return
 
         message = self._normalize_message(message)
         server_socket = self._get_connection()
-        self._send(
-            server_socket, f"SEND#{self._connected_user}#{username}#{message}"
-        )
+        self._send(server_socket, f"SEND#{self._connected_user}#{username}#{message}")
 
         try:
             response = self._recv_code(server_socket)
             match response:
                 case 0:
                     mid = self._recv_str(server_socket)
-                    print(f"c> SEND OK - MESSAGE {mid}")
+                    print(f"SEND OK - MESSAGE {mid}", end="\nc> ")
                 case 1:
-                    print("c> SEND FAIL, USER DOES NOT EXIST", file=sys.stderr)
+                    print(
+                        "SEND FAIL, USER DOES NOT EXIST", file=sys.stderr, end="\nc> "
+                    )
                 case _:
-                    print("c> SEND FAIL", file=sys.stderr)
+                    print("SEND FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
-            print("c> SEND FAIL", file=sys.stderr)
+            print("SEND FAIL", file=sys.stderr, end="\nc> ")
 
         server_socket.close()
 
@@ -233,26 +252,33 @@ class Client:
         """
         Envio de archivos adjuntos a otro cliente
         """
-        if (filename[0] != '/'):
+        if filename[0] != "/":
             # Los paths tienen que ser absolutos
-            print("c> SENDATTACH FAIL", file=sys.stderr)
+            print("SENDATTACH FAIL", file=sys.stderr, end="\nc> ")
             return
-        
+
         server_socket = self._get_connection()
 
-        self._send(server_socket, f"SENDATTACH#{self._connected_user}#{username}#{message}#{filename}")
+        self._send(
+            server_socket,
+            f"SENDATTACH#{self._connected_user}#{username}#{message}#{filename}",
+        )
         try:
             response = self._recv_code(server_socket)
             match response:
                 case 0:
                     mid = self._recv_str(server_socket)
-                    print(f"c> SENDATTACH OK - MESSAGE {mid}")
+                    print(f"SENDATTACH OK - MESSAGE {mid}", end="\nc> ")
                 case 1:
-                    print("c> SENDATTACH FAIL, USER DOES NOT EXIST", file=sys.stderr)
+                    print(
+                        "SENDATTACH FAIL, USER DOES NOT EXIST",
+                        file=sys.stderr,
+                        end="\nc> ",
+                    )
                 case _:
-                    print("c> SENDATTACH FAIL", file=sys.stderr)
+                    print("SENDATTACH FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
-            print("c> SENDATTACH FAIL", file=sys.stderr)
+            print("SENDATTACH FAIL", file=sys.stderr, end="\nc> ")
 
         server_socket.close()
         server_socket = None
@@ -268,19 +294,20 @@ class Client:
             match response:
                 case 0:
                     count = int(self._recv_str(server_socket))
-                    print(f"c> CONNECTED USERS ({count} users connected) OK")
+                    print(f"CONNECTED USERS ({count} users connected) OK", end="\nc> ")
                     for _ in range(count):
                         user = self._recv_str(server_socket)
                         print(f"\t{user}")
                 case 1:
                     print(
-                        "c> CONNECTED USERS FAIL, USER IS NOT CONNECTED",
+                        "CONNECTED USERS FAIL, USER IS NOT CONNECTED",
+                        end="\nc> ",
                         file=sys.stderr,
                     )
                 case _:
-                    print("c> CONNECTED USERS FAIL", file=sys.stderr)
+                    print("CONNECTED USERS FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
-            print("c> CONNECTED USERS FAIL", file=sys.stderr)
+            print("cONNECTED USERS FAIL", file=sys.stderr, end="\nc> ")
 
         server_socket.close()
 
@@ -288,3 +315,6 @@ class Client:
         if self._connected_user:
             self.disconnect(self._connected_user)
         sys.exit(0)
+
+    def get_file(self):
+        pass
