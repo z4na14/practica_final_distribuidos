@@ -4,7 +4,7 @@ from commands import Client
 
 def read_input(client: Client):
     while True:
-        curr_line = str(input("c> "))
+        curr_line = input("c> ")
 
         curr_command = curr_line.split(' ', 3)
         if curr_command[0] == "QUIT":
@@ -46,10 +46,10 @@ def read_input(client: Client):
             client.send(curr_command[1], curr_command[2])
 
         elif curr_command[0] == "SENDATTACH":
-            if len(curr_command) < 3:
-                print("INVALID COMMAND: SENDATTACH <userName> <message>", file=sys.stderr)
+            if len(curr_command) < 4:
+                print("INVALID COMMAND: SENDATTACH <userName> <message> <filename>", file=sys.stderr)
                 continue
-            client.send_attach()
+            client.send_attach(curr_command[1], curr_command[2], curr_command[3])
 
         elif curr_command[0] == "USERS":
             client.users()

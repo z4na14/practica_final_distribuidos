@@ -1,0 +1,125 @@
+================================================================
+  BANCO DE PRUEBAS DE INTEGRACIÓN
+  Servidor: 127.0.0.1:19997   Timeout cliente: 1s
+================================================================
+
+── 1. REGISTER
+  [PASS] register 'alice' (nuevo)
+  [PASS] register 'bob' (nuevo)
+  [PASS] register 'charlie' (nuevo)
+  [PASS] register 'diana' (nuevo)
+  [PASS] register 'eve' (nuevo)
+  [PASS] register duplicado → USERNAME IN USE
+  [PASS] register otro duplicado → USERNAME IN USE
+
+── 2. UNREGISTER
+  [PASS] unregister usuario existente → OK
+  [PASS] unregister ya borrado → USER DOES NOT EXIST
+  [PASS] unregister que nunca existió → USER DOES NOT EXIST
+  [PASS] re-register tras unregister → OK
+  [PASS] unregister definitivo de diana → OK
+
+── 3. CONNECT
+  [PASS] connect usuario registrado → OK
+  [PASS] connect usuario inexistente → USER DOES NOT EXIST
+  [PASS] connect ya conectado localmente (check cliente)
+  [PASS] connect usuario ya conectado (desde otro cliente)
+  [PASS] connect bob → OK
+  [PASS] connect charlie → OK
+  [PASS] tres usuarios conectados simultáneamente (sin conflicto)
+
+── 4. DISCONNECT
+  [PASS] disconnect sin hilo local → USER NOT CONNECTED
+  [PASS] disconnect usuario conectado → OK
+  [PASS] connected_user limpiado tras disconnect
+  [PASS] listening_thread limpiado tras disconnect
+  [PASS] reconectar bob tras disconnect → OK
+  [PASS] disconnect charlie → OK
+  [PASS] reconectar charlie tras disconnect → OK
+
+── 5. USERS
+  [PASS] users → CONNECTED USERS OK
+  [PASS] users cuenta 3 usuarios conectados
+  [PASS] users incluye alice
+  [PASS] users incluye bob
+  [PASS] users incluye charlie
+  [PASS] users no incluye diana (dada de baja)
+  [PASS] users no incluye eve (desconectada)
+  [PASS] users tras desconectar charlie → 2 usuarios
+  [PASS] charlie ya no aparece en users
+  [PASS] users desde no conectado → FAIL (servidor rechaza usuario vacío)
+
+── 6. SEND — entrega inmediata
+  [PASS] send alice→bob → SEND OK
+  [PASS] send devuelve ID numérico
+  [PASS] bob recibe el mensaje
+  [PASS] alice recibe ACK de entrega
+  [PASS] ID de segundo mensaje incrementa a 2
+  [PASS] ID de tercer mensaje es 3
+  [PASS] send a usuario inexistente → USER DOES NOT EXIST
+  [PASS] send sin estar conectado → USER NOT CONNECTED
+  [PASS] send alice→alice → SEND OK
+  [PASS] alice recibe su propio mensaje
+
+── 7. SEND — mensajes offline → entrega al reconectar
+  [PASS] send a charlie offline (1/3) → SEND OK (almacenado)
+  [PASS] send a charlie offline (2/3) → SEND OK (almacenado)
+  [PASS] send a charlie offline (3/3) → SEND OK (almacenado)
+  [PASS] send bob→charlie offline → SEND OK
+  [PASS] charlie recibe 'offline 1' al reconectar
+  [PASS] charlie recibe 'offline 2' al reconectar
+  [PASS] charlie recibe 'offline 3' al reconectar
+  [PASS] charlie recibe mensaje de bob offline
+  [PASS] alice/bob reciben ACKs por entregas offline
+
+── 8. Contenido de mensajes
+  [PASS] mensaje con espacios múltiples enviado
+  [PASS] bob recibe texto con espacios intacto
+  [PASS] mensaje UTF-8 enviado
+  [PASS] bob recibe UTF-8 correcto
+  [PASS] mensaje largo (200 chars) enviado
+  [PASS] mensaje con texto 'numeral' enviado
+
+── 9. SENDATTACH (validación cliente)
+  [PASS] sendattach sin '/' inicial → SENDATTACH FAIL (cliente)
+  [PASS] sendattach ruta relativa → SENDATTACH FAIL (cliente)
+  [PASS] sendattach sin separador → SENDATTACH FAIL (cliente)
+
+── 10. Interacciones entre operaciones
+  [PASS] register usuario conectado → USERNAME IN USE
+  [PASS] connect eve para test unregister-conectado
+  [PASS] unregister usuario conectado → UNREGISTER OK (BD lo borra)
+  [PASS] disconnect tras unregister → fallo servidor
+  [PASS] disconnect bob para siguiente test
+  [PASS] send a bob recién desconectado → SEND OK (almacenado)
+  [PASS] bob recibe mensaje pendiente al reconectar
+
+── 11. Reconexión múltiple
+  [PASS] preparar charlie para reconexión múltiple
+  [PASS] reconexión 1/4 → OK
+  [PASS] reconexión 2/4 → OK
+  [PASS] reconexión 3/4 → OK
+  [PASS] reconexión 4/4 → OK
+
+── 12. Mensajes concurrentes (alice y bob simultáneos)
+  [PASS] alice: 5 sends concurrentes → todos OK
+  [PASS] bob: 5 sends concurrentes → todos OK
+
+── 13. Contadores de ID independientes por receptor
+  [PASS] send a charlie devuelve ID numérico positivo
+  [PASS] ID de bob es independiente del de charlie (distinto)
+
+── 14. Limpieza y verificación estado final
+  [PASS] unregister final 'alice'
+  [PASS] unregister final 'bob'
+  [PASS] unregister final 'charlie'
+  [PASS] unregister final 'eve'
+  [PASS] 'alice' ya no existe tras unregister
+  [PASS] 'bob' ya no existe tras unregister
+  [PASS] 'charlie' ya no existe tras unregister
+  [PASS] 'eve' ya no existe tras unregister
+  [PASS] connect a usuario borrado → USER DOES NOT EXIST
+
+================================================================
+  RESULTADO: 89 PASADOS | 0 FALLADOS | 89 TOTAL
+================================================================
