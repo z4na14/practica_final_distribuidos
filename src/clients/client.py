@@ -1,12 +1,19 @@
 import sys
+
 from commands import Client
 
 
 def read_input(client: Client):
+    print("c> ", end="")
     while True:
-        curr_line = input("c> ")
+        curr_line = input()
 
-        curr_command = curr_line.split(' ', 3)
+        # En caso de tener una linea vacia, reimprimir la cadena inicial
+        if not curr_line.strip():
+            print("c> ", end="")
+            continue
+
+        curr_command = curr_line.split(" ", 3)
         if curr_command[0] == "QUIT":
             client.quit()
 
@@ -47,27 +54,36 @@ def read_input(client: Client):
 
         elif curr_command[0] == "SENDATTACH":
             if len(curr_command) < 4:
-                print("INVALID COMMAND: SENDATTACH <userName> <message> <filename>", file=sys.stderr)
+                print(
+                    "INVALID COMMAND: SENDATTACH <userName> <message> <filename>",
+                    file=sys.stderr,
+                )
                 continue
             client.send_attach(curr_command[1], curr_command[2], curr_command[3])
 
         elif curr_command[0] == "USERS":
             client.users()
 
+        elif curr_command[0] == "GETFILE":
+            pass
+
+
 def parse_args():
     if len(sys.argv) != 5:
-        print("Uso incorrecto del cliente:"
-              "\n\t-s: Dirección del servidor"
-              "\n\t-p: Puerto del servidor")
+        print(
+            "Uso incorrecto del cliente:"
+            "\n\t-s: Dirección del servidor"
+            "\n\t-p: Puerto del servidor"
+        )
         sys.exit(-1)
 
     address, port = "", 0
 
     for i, arg in enumerate(sys.argv):
-        if arg == "-s" and i < len(sys.argv):
-            address = sys.argv[i+1]
-        elif arg == "-p" and i < len(sys.argv):
-            port = int(sys.argv[i+1])
+        if arg == "-s" and i < len(sys.argv) - 1:
+            address = sys.argv[i + 1]
+        elif arg == "-p" and i < len(sys.argv) - 1:
+            port = int(sys.argv[i + 1])
 
     return address, port
 

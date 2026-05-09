@@ -71,11 +71,10 @@ $(BUILD_DIR)/tests: $(SRC_DIR)/tests.c $(SRC_DIR)/users.c $(BUILD_DIR)/sqlite3.o
 	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -lpthread -ldl $^ -o $@
 
 clean:
-	rm -f $(BUILD_DIR) && mkdir -p $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) && mkdir -p $(BUILD_DIR)
 	rm -f $(TEST_DIR)/db.sqlite ./db.sqlite
 
-export:
-	make clean
+export: clean
 	typst compile $(REPORT_DIR)/report.typ ./report.pdf
 	rm -f $(NAME)
 	zip -r $(NAME) \
