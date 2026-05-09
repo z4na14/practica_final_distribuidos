@@ -438,6 +438,126 @@ finally:
     server.terminate()
     server.wait()
 
+# ── 15. RPC — servidor de logging ────────────────────────────────────────────
+RPC_PORT = PORT + 1
+RPC_SERVER_BIN = "./build/log_rpc_server"
+
+section("15. RPC — servidor de logging")
+
+_rpc_lines = []
+_rpc_proc = None
+_rpc_server = None
+
+def _rpc_wait(text, timeout=3.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if any(text in l for l in _rpc_lines):
+            return True
+        time.sleep(0.1)
+    return False
+
+try:
+    if not os.path.exists(RPC_SERVER_BIN):
+        ok("binario log_rpc_server compilado", False, f"no encontrado: {RPC_SERVER_BIN}")
+        raise RuntimeError("skip")
+
+    ok("binario log_rpc_server compilado", True)
+
+    _rpc_proc = subprocess.Popen(
+        [RPC_SERVER_BIN],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    time.sleep(0.8)  # espera a que se registre en rpcbind
+
+    if _rpc_proc.poll() is not None:
+        ok("servidor RPC arranca (rpcbind disponible)", False,
+           "proceso terminó inmediatamente — comprobar que rpcbind está activo")
+        raise RuntimeError("skip")
+
+    ok("servidor RPC arranca (rpcbind disponible)", True)
+
+    def _read_rpc():
+        for line in _rpc_proc.stdout:
+            _rpc_lines.append(line.strip())
+    threading.Thread(target=_read_rpc, daemon=True).start()
+
+    _rpc_server = subprocess.Popen(
+        ["./build/server", "-p", str(RPC_PORT)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, "LOG_RPC_IP": "127.0.0.1"},
+    )
+    time.sleep(0.4)
+
+    def _nc():
+        return Client(HOST, RPC_PORT)
+
+    def _connect(username, delay=0.5):
+        cl = Client(HOST, RPC_PORT)
+        pos = snap()
+        cl.connect(username)
+        time.sleep(delay)
+        return cl, since(pos)
+
+    # REGISTER
+    pos = snap(); _nc().register("rpcalice")
+    ok("REGISTER con LOG_RPC_IP → REGISTER OK", "REGISTER OK" in since(pos))
+    ok("RPC log recibe entrada REGISTER", _rpc_wait("rpcalice REGISTER"))
+
+    # CONNECT
+    ca_r, out_connect = _connect("rpcalice")
+    ok("CONNECT con LOG_RPC_IP → CONNECT OK", "CONNECT OK" in out_connect)
+    ok("RPC log recibe entrada CONNECT", _rpc_wait("rpcalice CONNECT"))
+
+    # necesitamos un destinatario para SEND
+    _nc().register("rpcbob")
+    cb_r, _ = _connect("rpcbob")
+
+    # SEND
+    pos = snap(); ca_r.send("rpcbob", "hola rpc")
+    ok("SEND con LOG_RPC_IP → SEND OK", "SEND OK" in since(pos))
+    ok("RPC log recibe entrada SEND", _rpc_wait("rpcalice SEND"))
+    time.sleep(0.3)
+
+    # USERS
+    pos = snap(); ca_r.users()
+    ok("USERS con LOG_RPC_IP → CONNECTED USERS OK", "CONNECTED USERS" in since(pos))
+    ok("RPC log recibe entrada USERS", _rpc_wait("rpcalice USERS"))
+
+    # DISCONNECT
+    pos = snap(); ca_r.disconnect("rpcalice"); time.sleep(0.5)
+    ok("DISCONNECT con LOG_RPC_IP → DISCONNECT OK", "DISCONNECT OK" in since(pos))
+    ok("RPC log recibe entrada DISCONNECT", _rpc_wait("rpcalice DISCONNECT"))
+
+    # UNREGISTER
+    pos = snap(); _nc().unregister("rpcalice")
+    ok("UNREGISTER con LOG_RPC_IP → UNREGISTER OK", "UNREGISTER OK" in since(pos))
+    ok("RPC log recibe entrada UNREGISTER", _rpc_wait("rpcalice UNREGISTER"))
+
+    # verificar que las 6 operaciones distintas aparecen en el log
+    ops = ["REGISTER", "CONNECT", "SEND", "USERS", "DISCONNECT", "UNREGISTER"]
+    for op in ops:
+        ok(f"RPC log contiene operación {op}", any(op in l for l in _rpc_lines))
+
+    # limpieza
+    if cb_r._connected_user:
+        cb_r.disconnect("rpcbob"); time.sleep(0.3)
+    _nc().unregister("rpcbob")
+
+except RuntimeError:
+    pass  # skip marcado arriba
+
+finally:
+    if _rpc_server:
+        _rpc_server.terminate()
+        _rpc_server.wait()
+    if _rpc_proc:
+        _rpc_proc.terminate()
+        _rpc_proc.wait()
+
 # ── resumen ───────────────────────────────────────────────────────────────────
 
 log("")

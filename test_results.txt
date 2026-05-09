@@ -120,6 +120,28 @@
   [PASS] 'eve' ya no existe tras unregister
   [PASS] connect a usuario borrado → USER DOES NOT EXIST
 
+── 15. RPC — servidor de logging
+  [PASS] binario log_rpc_server compilado
+  [PASS] servidor RPC arranca (rpcbind disponible)
+  [PASS] REGISTER con LOG_RPC_IP → REGISTER OK
+  [PASS] RPC log recibe entrada REGISTER
+  [PASS] CONNECT con LOG_RPC_IP → CONNECT OK
+  [PASS] RPC log recibe entrada CONNECT
+  [PASS] SEND con LOG_RPC_IP → SEND OK
+  [PASS] RPC log recibe entrada SEND
+  [PASS] USERS con LOG_RPC_IP → CONNECTED USERS OK
+  [PASS] RPC log recibe entrada USERS
+  [PASS] DISCONNECT con LOG_RPC_IP → DISCONNECT OK
+  [PASS] RPC log recibe entrada DISCONNECT
+  [PASS] UNREGISTER con LOG_RPC_IP → UNREGISTER OK
+  [PASS] RPC log recibe entrada UNREGISTER
+  [PASS] RPC log contiene operación REGISTER
+  [PASS] RPC log contiene operación CONNECT
+  [PASS] RPC log contiene operación SEND
+  [PASS] RPC log contiene operación USERS
+  [PASS] RPC log contiene operación DISCONNECT
+  [PASS] RPC log contiene operación UNREGISTER
+
 ================================================================
-  RESULTADO: 89 PASADOS | 0 FALLADOS | 89 TOTAL
+  RESULTADO: 109 PASADOS | 0 FALLADOS | 109 TOTAL
 ================================================================
