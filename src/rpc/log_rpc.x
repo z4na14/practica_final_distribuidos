@@ -8,4 +8,4 @@ program LOG {
     version LOGVER {
         int registrar(struct peticion) = 1;
     } = 1;
-} = 100522240;
+} = 100;

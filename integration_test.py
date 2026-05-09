@@ -5,7 +5,8 @@ Uso: python3 integration_test.py
 Guarda resultados en test_results.txt.
 """
 
-import sys, time, threading, subprocess, re, os
+import sys, time, threading, subprocess, re, os, sqlite3 as _sqlite3
+import requests as _req
 
 sys.path.insert(0, "src/clients")
 from commands import Client
@@ -176,8 +177,8 @@ try:
     # ── 4. DISCONNECT ────────────────────────────────────────────────────────
     section("4. DISCONNECT")
 
-    pos = snap(); nc().disconnect("alice")
-    ok("disconnect sin hilo local → USER NOT CONNECTED", "USER NOT CONNECTED" in since(pos))
+    pos = snap(); nc().disconnect("eve")   # eve existe pero no está conectada
+    ok("disconnect usuario no conectado → USER NOT CONNECTED", "USER NOT CONNECTED" in since(pos))
 
     out = disconnect_wait(cb, "bob")
     ok("disconnect usuario conectado → OK", "DISCONNECT OK" in out)
@@ -284,6 +285,10 @@ try:
     ok("charlie recibe 'offline 3' al reconectar", "offline 3" in since(pos))
     ok("charlie recibe mensaje de bob offline", "offline de bob" in since(pos))
     ok("alice/bob reciben ACKs por entregas offline", "SEND MESSAGE" in since(pos))
+    s_ord = since(pos)
+    idx1, idx2, idx3 = s_ord.find("offline 1"), s_ord.find("offline 2"), s_ord.find("offline 3")
+    ok("mensajes offline llegan en orden de envío (1 antes de 2 antes de 3)",
+       0 <= idx1 < idx2 < idx3, f"posiciones: {idx1}, {idx2}, {idx3}")
 
     # ── 8. SEND — contenido de mensajes ──────────────────────────────────────
     section("8. Contenido de mensajes")
@@ -412,8 +417,170 @@ try:
     id_bo = m.group(1) if m else "?"
     ok("ID de bob es independiente del de charlie (distinto)", id_bo != id_ch, f"id bob={id_bo}, id charlie={id_ch}")
 
-    # ── 14. Limpieza y verificación final ────────────────────────────────────
-    section("14. Limpieza y verificación estado final")
+    # wrap-around: forzamos el contador de charlie a UINT_MAX y comprobamos que el siguiente ID es 1
+    try:
+        _db = _sqlite3.connect("db.sqlite")
+        _db.execute("UPDATE users SET msg_counter = 4294967295 WHERE name = 'charlie'")
+        _db.commit()
+        _db.close()
+        pos = snap(); ca.send("charlie", "wrap test")
+        time.sleep(0.3)
+        m_w = re.search(r"SEND OK - MESSAGE (\d+)", since(pos))
+        id_w = m_w.group(1) if m_w else "?"
+        ok("wrap-around: ID vuelve a 1 tras alcanzar UINT_MAX", id_w == "1", f"id={id_w}")
+    except Exception as e:
+        ok("wrap-around: ID vuelve a 1 tras alcanzar UINT_MAX", False, str(e))
+
+    # ── 14. Web Service — /quitar-espacios ───────────────────────────────────
+    section("14. Web Service — /quitar-espacios")
+
+    _ws_proc = subprocess.Popen(
+        ["python3", "src/ws/app.py"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # esperar a que Flask esté listo antes de hacer peticiones
+    for _ in range(20):
+        try:
+            _req.post(f"http://{HOST}:3000/quitar-espacios", json={"cadena": "x"}, timeout=0.5)
+            break
+        except Exception:
+            time.sleep(0.2)
+
+    WS_URL = f"http://{HOST}:3000/quitar-espacios"
+
+    try:
+        r = _req.post(WS_URL, json={"cadena": "hola  mundo"}, timeout=3)
+        ok("web service arranca y responde 200", r.status_code == 200)
+        ok("normaliza espacios dobles", r.text == "hola mundo")
+    except Exception as e:
+        ok("web service arranca y responde 200", False, str(e))
+        ok("normaliza espacios dobles", False)
+
+    try:
+        r = _req.post(WS_URL, json={"cadena": "  al  borde  "}, timeout=3)
+        ok("elimina espacios al principio y al final", r.text == "al borde")
+    except Exception:
+        ok("elimina espacios al principio y al final", False)
+
+    try:
+        r = _req.post(WS_URL, json={"cadena": "sola"}, timeout=3)
+        ok("cadena sin espacios extras → sin cambios", r.text == "sola")
+    except Exception:
+        ok("cadena sin espacios extras → sin cambios", False)
+
+    try:
+        r = _req.post(WS_URL, json={"cadena": "a   b   c"}, timeout=3)
+        ok("normaliza múltiples bloques de espacios", r.text == "a b c")
+    except Exception:
+        ok("normaliza múltiples bloques de espacios", False)
+
+    # SEND pasa el mensaje por el web service antes de enviarlo al servidor
+    pos = snap()
+    ca.send("bob", "muchos    espacios    aqui")
+    time.sleep(0.5)
+    ok("SEND normaliza via web service antes de enviar", "SEND OK" in since(pos))
+    ok("bob recibe el mensaje con espacios normalizados", wait_for("muchos espacios aqui", pos))
+
+    _ws_proc.terminate()
+    _ws_proc.wait()
+
+    # fallback: si Flask no está disponible, SEND sigue funcionando sin normalizar
+    pos = snap()
+    ca.send("bob", "tres   espacios")
+    time.sleep(0.5)
+    ok("SEND funciona con Flask caído (fallback silencioso)", "SEND OK" in since(pos))
+    ok("bob recibe el mensaje sin normalizar cuando Flask está caído",
+       wait_for("tres   espacios", pos))
+
+    # ── 15. SENDATTACH ────────────────────────────────────────────────────────
+    section("15. SENDATTACH")
+
+    _attach_file = "/tmp/test_sendattach_integ.txt"
+    with open(_attach_file, "w") as f:
+        f.write("contenido del adjunto de prueba\n")
+
+    # entrega inmediata: alice → bob (conectado)
+    pos = snap()
+    ca.send_attach("bob", "mira este adjunto", _attach_file)
+    time.sleep(0.6)
+    s = since(pos)
+    ok("sendattach alice→bob → SENDATTACH OK", "SENDATTACH OK - MESSAGE" in s)
+    m_sa = re.search(r"SENDATTACH OK - MESSAGE (\d+)", s)
+    sa_id = m_sa.group(1) if m_sa else ""
+    ok("sendattach devuelve ID numérico", sa_id.isdigit(), f"id={sa_id}")
+    ok("bob recibe FILE con el nombre del fichero", wait_for(f"FILE {_attach_file}", pos))
+    ok("alice recibe ACK con nombre de fichero", wait_for(f"{_attach_file} OK", pos))
+
+    # usuario inexistente
+    pos = snap()
+    ca.send_attach("fantasma", "adj", _attach_file)
+    time.sleep(0.3)
+    ok("sendattach a usuario inexistente → SENDATTACH FAIL", "SENDATTACH FAIL" in since(pos))
+
+    # entrega offline: charlie está desconectado, el adjunto se almacena y entrega al reconectar
+    pos = snap()
+    ca.send_attach("charlie", "adjunto para cuando te conectes", _attach_file)
+    time.sleep(0.3)
+    ok("sendattach a charlie offline → SENDATTACH OK (almacenado)", "SENDATTACH OK" in since(pos))
+
+    pos_ch = snap()
+    cc_sa = connect_wait("charlie", delay=1.5)
+    ok("charlie recibe el adjunto al reconectar", wait_for(f"FILE {_attach_file}", pos_ch))
+    ok("alice recibe ACK por entrega offline del adjunto", wait_for(f"{_attach_file} OK", pos_ch))
+    disconnect_wait(cc_sa, "charlie")
+
+    os.remove(_attach_file)
+
+    # ── 16. GETFILE ───────────────────────────────────────────────────────────
+    section("16. GETFILE")
+
+    _gf_src = "/tmp/test_getfile_integ.bin"
+    _gf_dst = "/tmp/test_getfile_recv.bin"
+    # binario con bytes distintos para detectar cualquier corrupción
+    _gf_data = b"A" * 5000 + b"\x00\xff" * 1000 + b"Z" * 3000
+    with open(_gf_src, "wb") as f:
+        f.write(_gf_data)
+
+    # el caché puede tener el puerto antiguo de bob (fue reconectado varias veces)
+    ca._connected_users_info.clear()
+
+    pos = snap()
+    ca.get_file("bob", _gf_src, _gf_dst)
+    ok("getfile → transferencia completada (GETFILE OK)", wait_for("GETFILE OK", pos, timeout=8.0))
+
+    try:
+        with open(_gf_dst, "rb") as f:
+            recv_data = f.read()
+        ok("tamaño del fichero recibido es correcto",
+           len(recv_data) == len(_gf_data),
+           f"esperado={len(_gf_data)}, recibido={len(recv_data)}")
+        ok("contenido del fichero es idéntico al original", recv_data == _gf_data)
+    except FileNotFoundError:
+        ok("tamaño del fichero recibido es correcto", False, "archivo no encontrado")
+        ok("contenido del fichero es idéntico al original", False)
+
+    # sin estar conectado
+    cx_nc = nc()
+    pos = snap()
+    cx_nc.get_file("bob", _gf_src, _gf_dst)
+    time.sleep(0.2)
+    ok("getfile sin estar conectado → GETFILE FAIL", "GETFILE FAIL" in since(pos))
+
+    # charlie está offline → FILE TRANSFER FAILED
+    pos = snap()
+    ca.get_file("charlie", _gf_src, _gf_dst)
+    time.sleep(0.5)
+    ok("getfile de usuario offline → FILE TRANSFER FAILED", "FILE TRANSFER FAILED" in since(pos))
+
+    for p in [_gf_src, _gf_dst]:
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+
+    # ── 17. Limpieza y verificación estado final ─────────────────────────────
+    section("17. Limpieza y verificación estado final")
 
     for cl, name in [(ca, "alice"), (cb3, "bob")]:
         if cl._connected_user:
@@ -438,11 +605,11 @@ finally:
     server.terminate()
     server.wait()
 
-# ── 15. RPC — servidor de logging ────────────────────────────────────────────
+# ── 18. RPC — servidor de logging ────────────────────────────────────────────
 RPC_PORT = PORT + 1
 RPC_SERVER_BIN = "./build/log_rpc_server"
 
-section("15. RPC — servidor de logging")
+section("18. RPC — servidor de logging")
 
 _rpc_lines = []
 _rpc_proc = None

@@ -22,7 +22,7 @@ struct peticion {
 };
 typedef struct peticion peticion;
 
-#define LOG 100522240
+#define LOG 100
 #define LOGVER 1
 
 #if defined(__STDC__) || defined(__cplusplus)

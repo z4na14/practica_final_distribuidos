@@ -14,8 +14,7 @@
 #include "users.h"
 #include "log_client.h"
 
-/* fd del socket principal de escucha del servidor; necesitamos acceso global
-   para poder cerrarlo limpiamente desde el manejador de señales */
+// global para cerrarlo desde el signal handler
 static int server_fd = -1;
 
 typedef struct {
@@ -32,7 +31,6 @@ static int conn_deliver(const char *receiver, const char *sender,
     char message[MAX_NAME + MAX_MSG + 512];
     size_t message_len;
     
-    // Verificamos si hay un archivo adjunto
     if (filename && strlen(filename) > 0) {
         message_len = snprintf(message, sizeof(message), "SEND_MESSAGE_ATTACH#%s#%s#%s#%s",
                                sender, msg_id_str, text, filename);
@@ -85,7 +83,6 @@ static int conn_deliver(const char *receiver, const char *sender,
     
     msg_delete(receiver, msg_id);
 
-    // Preparación del ACK para el cliente remitente
     char ack_message[256];
     size_t ack_len;
     if (filename && strlen(filename) > 0) {
@@ -128,7 +125,7 @@ static void send_code(const int client_fd, const uint8_t code) {
 
 // lee el mensaje hasta '\0' y lo divide por '#' en fields; devuelve el número de campos
 static int recv_msg(const int client_fd, char fields[][MAX_NAME]) {
-    char raw_buf[MAX_NAME * 3 + 64];
+    char raw_buf[MAX_NAME * 5 + 64];
     int bytes_read = 0;
     char c;
 
@@ -235,8 +232,6 @@ static void handle_connect(int client_fd, const char *client_ip,
     printf("s> CONNECT %s OK\n", username);
     rpc_log(username, "CONNECT", "");
 
-    /* cerramos el fd antes de entregar pendientes; el cliente necesita
-       tiempo para hacer bind en su puerto de escucha (100 ms) */
     close(client_fd);
     usleep(100000);
 
@@ -260,8 +255,7 @@ static void handle_disconnect(int client_fd, const char *client_ip,
     }
     const char *username = fields[1];
 
-    /* solo se acepta DISCONNECT desde la misma IP con la que se conectó;
-       stored_ip solo está inicializado si conn_status == 0 (el || evalúa en cortocircuito) */
+    /* rechazamos si viene de otra IP; stored_ip solo está relleno si conn_status == 0 */
     char stored_ip[16];
     uint16_t stored_port;
     int conn_status = user_get_conn_info(username, stored_ip, &stored_port);
@@ -291,7 +285,7 @@ static void handle_send(int client_fd, char fields[][MAX_NAME], int field_count)
     const char *receiver = fields[2];
     const char *text = fields[3];
 
-    // solo necesitamos comprobar si el usuario existe
+    // el receptor puede estar offline; solo rechazamos si no existe
     char unused_ip[16];
     uint16_t unused_port;
     if (user_get_conn_info(receiver, unused_ip, &unused_port) == 1) {
@@ -350,9 +344,6 @@ static void handle_send_attached(int client_fd, char fields[][MAX_NAME], int fie
     }
 }
 
-/* Devuelve la lista de usuarios conectados en el momento de la consulta.
-   Solo pueden pedirla usuarios que estén ellos mismos conectados.
-   Devuelve 0 y el número de usuarios seguido de sus nombres junto con IP y puerto, o 1/2 si hubo un error. */
 static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count) {
     if (field_count < 2) {
         send_code(client_fd, 2);
@@ -364,7 +355,7 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
     uint16_t unused_port;
     int conn_status = user_get_conn_info(username, unused_ip, &unused_port);
 
-    // los códigos enviados son inversos a conn_status
+    // los códigos de respuesta son inversos a conn_status (1→no conectado, 2→no existe)
     if (conn_status == 1 || conn_status == 2) {
         send_code(client_fd, (conn_status == 1) ? 2 : 1);
         printf("s> CONNECTEDUSERS FAIL\n");
@@ -384,14 +375,13 @@ static void handle_users(int client_fd, char fields[][MAX_NAME], int field_count
     snprintf(count_str, sizeof(count_str), "%d", user_count);
     send(client_fd, count_str, strlen(count_str) + 1, 0);
 
-    // Para cada usuario conectado, enviamos: usuario::IP::puerto
     for (int i = 0; i < user_count; i++) {
         char user_ip[16];
         uint16_t user_port;
 
         if (user_get_conn_info(connected_names[i], user_ip, &user_port) == 0) {
-            char user_info[MAX_NAME + 32]; // Padding extra de 32 bytes para el resto de la cadena
-            snprintf(user_info, sizeof(user_info), "%.*s::%.15s::%u", // Que loco el formateo de variables
+            char user_info[MAX_NAME + 32];
+            snprintf(user_info, sizeof(user_info), "%.*s::%.15s::%u",
                      MAX_NAME, connected_names[i], user_ip, user_port);
             send(client_fd, user_info, strlen(user_info) + 1, 0);
         }

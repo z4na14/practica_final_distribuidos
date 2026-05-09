@@ -29,7 +29,7 @@
   [PASS] tres usuarios conectados simultáneamente (sin conflicto)
 
 ── 4. DISCONNECT
-  [PASS] disconnect sin hilo local → USER NOT CONNECTED
+  [PASS] disconnect usuario no conectado → USER NOT CONNECTED
   [PASS] disconnect usuario conectado → OK
   [PASS] connected_user limpiado tras disconnect
   [PASS] listening_thread limpiado tras disconnect
@@ -71,6 +71,7 @@
   [PASS] charlie recibe 'offline 3' al reconectar
   [PASS] charlie recibe mensaje de bob offline
   [PASS] alice/bob reciben ACKs por entregas offline
+  [PASS] mensajes offline llegan en orden de envío (1 antes de 2 antes de 3)
 
 ── 8. Contenido de mensajes
   [PASS] mensaje con espacios múltiples enviado
@@ -108,8 +109,37 @@
 ── 13. Contadores de ID independientes por receptor
   [PASS] send a charlie devuelve ID numérico positivo
   [PASS] ID de bob es independiente del de charlie (distinto)
+  [PASS] wrap-around: ID vuelve a 1 tras alcanzar UINT_MAX
 
-── 14. Limpieza y verificación estado final
+── 14. Web Service — /quitar-espacios
+  [PASS] web service arranca y responde 200
+  [PASS] normaliza espacios dobles
+  [PASS] elimina espacios al principio y al final
+  [PASS] cadena sin espacios extras → sin cambios
+  [PASS] normaliza múltiples bloques de espacios
+  [PASS] SEND normaliza via web service antes de enviar
+  [PASS] bob recibe el mensaje con espacios normalizados
+  [PASS] SEND funciona con Flask caído (fallback silencioso)
+  [PASS] bob recibe el mensaje sin normalizar cuando Flask está caído
+
+── 15. SENDATTACH
+  [PASS] sendattach alice→bob → SENDATTACH OK
+  [PASS] sendattach devuelve ID numérico
+  [PASS] bob recibe FILE con el nombre del fichero
+  [PASS] alice recibe ACK con nombre de fichero
+  [PASS] sendattach a usuario inexistente → SENDATTACH FAIL
+  [PASS] sendattach a charlie offline → SENDATTACH OK (almacenado)
+  [PASS] charlie recibe el adjunto al reconectar
+  [PASS] alice recibe ACK por entrega offline del adjunto
+
+── 16. GETFILE
+  [PASS] getfile → transferencia completada (GETFILE OK)
+  [PASS] tamaño del fichero recibido es correcto
+  [PASS] contenido del fichero es idéntico al original
+  [PASS] getfile sin estar conectado → GETFILE FAIL
+  [PASS] getfile de usuario offline → FILE TRANSFER FAILED
+
+── 17. Limpieza y verificación estado final
   [PASS] unregister final 'alice'
   [PASS] unregister final 'bob'
   [PASS] unregister final 'charlie'
@@ -120,7 +150,7 @@
   [PASS] 'eve' ya no existe tras unregister
   [PASS] connect a usuario borrado → USER DOES NOT EXIST
 
-── 15. RPC — servidor de logging
+── 18. RPC — servidor de logging
   [PASS] binario log_rpc_server compilado
   [PASS] servidor RPC arranca (rpcbind disponible)
   [PASS] REGISTER con LOG_RPC_IP → REGISTER OK
@@ -143,5 +173,5 @@
   [PASS] RPC log contiene operación UNREGISTER
 
 ================================================================
-  RESULTADO: 109 PASADOS | 0 FALLADOS | 109 TOTAL
+  RESULTADO: 133 PASADOS | 0 FALLADOS | 133 TOTAL
 ================================================================

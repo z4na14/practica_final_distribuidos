@@ -7,7 +7,7 @@
 #include "users.h"
 #include "common.h"
 
-// acceso serializado por db_mutex para evitar carreras entre hilos
+// db_mutex serializa todos los accesos; SQLite no es thread-safe por defecto
 static sqlite3 *db = NULL;
 static pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -56,7 +56,7 @@ int db_init(void) {
 
 void db_close(void) {
     if (db) {
-        sqlite3_close_v2(db); // v2 cierra aunque queden statements sin finalizar
+        sqlite3_close_v2(db); // v2 no falla si quedan statements sin finalizar
         db = NULL;
     }
 }
@@ -117,7 +117,7 @@ int user_remove(const char *name) {
         return 1;
     }
 
-    // primero mensajes para no dejar huérfanos en la tabla
+    // borramos sus mensajes antes que al usuario para no dejar huérfanos
     rc = sqlite3_prepare_v2(db,
         "DELETE FROM messages WHERE receiver = ?;",
         -1, &stmt, NULL);
@@ -306,13 +306,12 @@ unsigned int msg_add(const char *receiver, const char *sender, const char *text,
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 
-    /* Si no se modificó ninguna fila, el receptor no existe */
+    // si changes()==0 el receptor no existe
     if (rc != SQLITE_DONE || sqlite3_changes(db) == 0) {
         pthread_mutex_unlock(&db_mutex);
         return 0;
     }
 
-    /* Leemos el valor actualizado del contador para saber qué ID usar */
     rc = sqlite3_prepare_v2(db,
         "SELECT msg_counter FROM users WHERE name = ?;",
         -1, &stmt, NULL);
@@ -327,28 +326,9 @@ unsigned int msg_add(const char *receiver, const char *sender, const char *text,
         pthread_mutex_unlock(&db_mutex);
         return 0;
     }
-    unsigned int current = (unsigned int)sqlite3_column_int64(stmt, 0);
+    unsigned int new_id = (unsigned int)sqlite3_column_int64(stmt, 0);
     sqlite3_finalize(stmt);
 
-    unsigned int new_id = (current >= UINT_MAX) ? 1 : current + 1;
-
-    rc = sqlite3_prepare_v2(db,
-        "UPDATE users SET msg_counter = ? WHERE name = ?;",
-        -1, &stmt, NULL);
-    if (rc != SQLITE_OK) {
-        pthread_mutex_unlock(&db_mutex);
-        return 0;
-    }
-    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)new_id);
-    sqlite3_bind_text(stmt, 2, receiver, -1, SQLITE_STATIC);
-    rc = sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-    if (rc != SQLITE_DONE) {
-        pthread_mutex_unlock(&db_mutex);
-        return 0;
-    }
-
-    // MODIFICADO: Insertamos el 'filename'
     rc = sqlite3_prepare_v2(db,
         "INSERT INTO messages (id, sender, receiver, message, filename) "
         "VALUES (?, ?, ?, ?, ?);",
@@ -362,7 +342,6 @@ unsigned int msg_add(const char *receiver, const char *sender, const char *text,
     sqlite3_bind_text(stmt, 3, receiver, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 4, text, -1, SQLITE_STATIC);
     
-    // Asignación de NULO si no existe el fichero
     if (filename && strlen(filename) > 0) {
         sqlite3_bind_text(stmt, 5, filename, -1, SQLITE_STATIC);
     } else {

@@ -41,9 +41,9 @@ int main(void) {
     printf("info nadie: %d (esperado 1)\n", user_get_conn_info("nadie", ip, &port));
 
     // msg_add
-    unsigned int id1 = msg_add("bob", "alice", "hola bob");
-    unsigned int id2 = msg_add("bob", "alice", "segundo mensaje");
-    unsigned int id3 = msg_add("nadie", "alice", "a nadie");
+    unsigned int id1 = msg_add("bob", "alice", "hola bob", NULL);
+    unsigned int id2 = msg_add("bob", "alice", "segundo mensaje", NULL);
+    unsigned int id3 = msg_add("nadie", "alice", "a nadie", NULL);
     printf("msg id1: %u (esperado 1)\n", id1);
     printf("msg id2: %u (esperado 2)\n", id2);
     printf("msg id3: %u (esperado 0)\n", id3);
@@ -52,15 +52,15 @@ int main(void) {
     unsigned int mid;
     char sender[MAX_NAME], text[MAX_MSG];
 
-    printf("msg_get_next bob: %d (esperado 0)\n", msg_get_next("bob", &mid, sender, text));
+    printf("msg_get_next bob: %d (esperado 0)\n", msg_get_next("bob", &mid, sender, text, NULL));
     printf("  id=%u from='%s' text='%s'\n", mid, sender, text);
     printf("msg_delete: %d (esperado 0)\n", msg_delete("bob", mid));
 
-    printf("msg_get_next bob: %d (esperado 0)\n", msg_get_next("bob", &mid, sender, text));
+    printf("msg_get_next bob: %d (esperado 0)\n", msg_get_next("bob", &mid, sender, text, NULL));
     printf("  id=%u from='%s' text='%s'\n", mid, sender, text);
     printf("msg_delete: %d (esperado 0)\n", msg_delete("bob", mid));
 
-    printf("msg_get_next bob: %d (esperado 1)\n", msg_get_next("bob", &mid, sender, text));
+    printf("msg_get_next bob: %d (esperado 1)\n", msg_get_next("bob", &mid, sender, text, NULL));
 
     // user_disconnect
     printf("disconnect alice: %d (esperado 0)\n", user_disconnect("alice"));

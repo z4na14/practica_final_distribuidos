@@ -66,9 +66,7 @@ class Client:
                     ) as msg_lst_socket:
                         msg_lst_socket.bind(("0.0.0.0", self._client_port))
                         msg_lst_socket.listen()
-                        msg_lst_socket.settimeout(
-                            self.TIMEOUT
-                        )  # para poder comprobar _terminate; sin esto accept() bloquea indefinidamente
+                        msg_lst_socket.settimeout(self.TIMEOUT)  # sin timeout accept() bloquea forever y nunca salimos del bucle
 
                         while not self._terminate:
                             try:
@@ -115,7 +113,7 @@ class Client:
             _, m_id = parts
             print(f"\rc> SEND MESSAGE {m_id} OK", end="\nc> ")
         elif codigo_op == "SEND_MESSAGE_ATTACH":
-            # Using custom split for the ATTACH to avoid the limit of 3 splits
+            # 5 campos, no 4; con maxsplit=3 el filename quedaría pegado al mensaje
             attach_parts = message.split("#", 4)
             if len(attach_parts) == 5:
                 _, sender, m_id, text, file_name = attach_parts
@@ -131,16 +129,12 @@ class Client:
             getfile_parts = message.split("#", 4)
             if len(getfile_parts) == 5:
                 _, requester, filename, req_ip, req_port = getfile_parts
-                # Lanza el hilo de envio de archivo, enviando al IP/puerto del que lo pidió
                 threading.Thread(
                     target=self._handle_send_file,
                     args=(filename, req_ip, int(req_port)),
                 ).start()
 
     def _handle_send_file(self, filename: str, target_ip: str, target_port: int):
-        """
-        Hilo responsable de enviar el fichero por bloques al usuario solicitante.
-        """
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((target_ip, target_port))
@@ -155,9 +149,6 @@ class Client:
             pass
 
     def _handle_get_file(self, recv_socket: socket.socket, local_filename: str):
-        """
-        Hilo responsable de recibir un fichero y guardarlo de forma local.
-        """
         try:
             recv_socket.listen()
             recv_socket.settimeout(self.TIMEOUT)
@@ -176,9 +167,6 @@ class Client:
             recv_socket.close()
 
     def _update_users_info(self):
-        """
-        Solicitud interna de usuarios para refrescar la IP y el puerto de cada uno.
-        """
         server_socket = self._get_connection()
         username = self._connected_user if self._connected_user else ""
         self._send(server_socket, f"USERS#{username}")
@@ -342,11 +330,7 @@ class Client:
         server_socket.close()
 
     def send_attach(self, username: str, message: str, filename: str):
-        """
-        Envio de archivos adjuntos a otro cliente
-        """
         if filename[0] != "/":
-            # Los paths tienen que ser absolutos
             print("\rc> SENDATTACH FAIL", file=sys.stderr, end="\nc> ")
             return
 
@@ -392,8 +376,6 @@ class Client:
                     for _ in range(count):
                         user_info = self._recv_str(server_socket)
                         out += f"\n\t{user_info}"
-                        
-                        # Extraer y guardar en memoria de forma robusta
                         parts = [p.strip() for p in user_info.replace(":", " ").split()]
                         if len(parts) >= 3:
                             u_name = parts[0]
@@ -427,7 +409,6 @@ class Client:
             print("\rc> GETFILE FAIL", file=sys.stderr, end="\nc> ")
             return
 
-        # Refrescar listado si el usuario no se encuentra en el listado local cacheado
         if username not in self._connected_users_info:
             self._update_users_info()
 
@@ -448,7 +429,8 @@ class Client:
             recv_socket.bind(("", 0))
             my_port = recv_socket.getsockname()[1]
 
-            # Obtener nuestra IP de red local usada para contactar el servidor
+            # UDP no manda nada, pero el SO elige la interfaz de red correcta
+            # y así obtenemos nuestra IP vista desde el servidor
             temp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
                 temp_sock.connect((self._server_address, self._server_main_port))
@@ -458,6 +440,8 @@ class Client:
             finally:
                 temp_sock.close()
 
+            # arrancamos el receptor antes de mandar la petición;
+            # si lo hacemos al revés el otro cliente puede conectar antes de que estemos escuchando
             thread = threading.Thread(
                 target=self._handle_get_file, args=(recv_socket, local_filename)
             )
