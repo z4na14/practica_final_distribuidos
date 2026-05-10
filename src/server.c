@@ -30,7 +30,7 @@ static int conn_deliver(const char *receiver, const char *sender,
 
     char message[MAX_NAME + MAX_MSG + 512];
     size_t message_len;
-    
+
     if (filename && strlen(filename) > 0) {
         message_len = snprintf(message, sizeof(message), "SEND_MESSAGE_ATTACH#%s#%s#%s#%s",
                                sender, msg_id_str, text, filename);
@@ -80,7 +80,7 @@ static int conn_deliver(const char *receiver, const char *sender,
     } else {
         printf("s> SEND MESSAGE %u FROM %s TO %s\n", msg_id, sender, receiver);
     }
-    
+
     msg_delete(receiver, msg_id);
 
     char ack_message[256];
@@ -215,7 +215,6 @@ static void handle_connect(int client_fd, const char *client_ip,
                            char fields[][MAX_NAME], int field_count) {
     if (field_count < 3) {
         send_code(client_fd, 3);
-        close(client_fd);
         return;
     }
     const char *username = fields[1];
@@ -226,13 +225,11 @@ static void handle_connect(int client_fd, const char *client_ip,
 
     if (result != 0) {
         printf("s> CONNECT %s FAIL\n", username);
-        close(client_fd);
         return;
     }
     printf("s> CONNECT %s OK\n", username);
     rpc_log(username, "CONNECT", "");
 
-    close(client_fd);
     usleep(100000);
 
     unsigned int msg_id;
@@ -432,7 +429,7 @@ static void *handle_client(void *arg) {
             break;
         case 3:
             handle_connect(client_fd, client_ip, message_fields, field_count);
-            return NULL; /* el fd lo cierra handle_connect */
+            break;
         case 4:
             handle_disconnect(client_fd, client_ip, message_fields, field_count);
             break;
@@ -515,7 +512,6 @@ int main(const int argc, char *argv[]) {
     }
 
     printf("s> init server %s:%d\n", get_local_ip(), listen_port);
-    printf("s> ");
     fflush(stdout);
 
     struct sockaddr_in incoming_addr;

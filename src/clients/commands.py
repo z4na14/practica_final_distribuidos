@@ -66,15 +66,16 @@ class Client:
                     ) as msg_lst_socket:
                         msg_lst_socket.bind(("0.0.0.0", self._client_port))
                         msg_lst_socket.listen()
-                        msg_lst_socket.settimeout(self.TIMEOUT)  # sin timeout accept() bloquea forever y nunca salimos del bucle
+                        msg_lst_socket.settimeout(self.TIMEOUT)
 
                         while not self._terminate:
                             try:
                                 connection, _ = msg_lst_socket.accept()
-                                msg = self._recv_str(connection)
-                                connection.close()
-                                if msg:
-                                    self._parse_incoming_message(msg)
+                                threading.Thread(
+                                    target=self._handle_incoming_connection,
+                                    args=(connection,),
+                                    daemon=True,
+                                ).start()
                             except socket.timeout:
                                 continue
 
@@ -98,6 +99,15 @@ class Client:
         self._terminate = False
         self._connected_user = None
         self._listening_thread = None
+
+    def _handle_incoming_connection(self, connection: socket.socket):
+        try:
+            msg = self._recv_str(connection)
+            connection.close()
+            if msg:
+                self._parse_incoming_message(msg)
+        except Exception:
+            return
 
     def _parse_incoming_message(self, message: str):
         parts = message.split("#", 3)
@@ -387,17 +397,21 @@ class Client:
                             else:
                                 continue
                             self._connected_users_info[u_name] = (ip, port)
-                            
+
                     print(out, end="\nc> ")
                 case 1:
-                    print("\rc> CONNECTED USERS FAIL, USER IS NOT CONNECTED", end="\nc> ", file=sys.stderr)
+                    print(
+                        "\rc> CONNECTED USERS FAIL, USER IS NOT CONNECTED",
+                        end="\nc> ",
+                        file=sys.stderr,
+                    )
                 case _:
                     print("\rc> CONNECTED USERS FAIL", file=sys.stderr, end="\nc> ")
         except socket.timeout:
             print("\rc> CONNECTED USERS FAIL", file=sys.stderr, end="\nc> ")
 
         server_socket.close()
-        
+
     def quit(self):
         if self._connected_user:
             self.disconnect(self._connected_user)
