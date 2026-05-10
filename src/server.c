@@ -61,8 +61,6 @@ static int conn_deliver(const char *receiver, const char *sender,
     receiver_addr.sin_addr.s_addr = inet_addr(receiver_ip);
 
     if (connect(receiver_fd, (struct sockaddr *) &receiver_addr, sizeof(receiver_addr)) < 0) {
-        // se fue sin desconectarse
-        user_disconnect(receiver);
         close(receiver_fd);
         return -1;
     }
@@ -71,7 +69,6 @@ static int conn_deliver(const char *receiver, const char *sender,
     close(receiver_fd);
 
     if (bytes_sent <= 0) {
-        user_disconnect(receiver);
         return -1;
     }
 
@@ -504,6 +501,7 @@ int main(const int argc, char *argv[]) {
     }
 
     signal(SIGINT, sigint_handler);
+    signal(SIGPIPE, SIG_IGN);
 
     const uint16_t listen_port = (uint16_t) atoi(argv[2]);
     if (initialize_listening_sock(listen_port) < 0) {
@@ -520,7 +518,7 @@ int main(const int argc, char *argv[]) {
     while (1) {
         ClientArg *client_arg = malloc(sizeof(ClientArg)); // Liberado dentro del hilo
         if (!client_arg) { break; }
-
+        
         client_arg->fd = accept(server_fd, (struct sockaddr *) &incoming_addr, &incoming_addr_len);
         if (client_arg->fd < 0) {
             free(client_arg);

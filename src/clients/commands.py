@@ -44,10 +44,9 @@ class Client:
         return buf.decode("utf_8")
 
     def _listen_server(self, username: str):
-        temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        temp_socket.bind(("", 0))  # puerto 0 = el SO elige uno libre
-        self._client_port = temp_socket.getsockname()[1]
-        temp_socket.close()
+        msg_lst_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        msg_lst_socket.bind(("0.0.0.0", 0))
+        self._client_port = msg_lst_socket.getsockname()[1]
 
         server_socket = self._get_connection()
         self._send(server_socket, f"CONNECT#{username}#{self._client_port}")
@@ -61,23 +60,19 @@ class Client:
                     print("\rc> CONNECT OK", end="\nc> ")
                     self._connected_user = username
 
-                    with socket.socket(
-                        socket.AF_INET, socket.SOCK_STREAM
-                    ) as msg_lst_socket:
-                        msg_lst_socket.bind(("0.0.0.0", self._client_port))
-                        msg_lst_socket.listen()
-                        msg_lst_socket.settimeout(self.TIMEOUT)
+                    msg_lst_socket.listen()
+                    msg_lst_socket.settimeout(self.TIMEOUT)
 
-                        while not self._terminate:
-                            try:
-                                connection, _ = msg_lst_socket.accept()
-                                threading.Thread(
-                                    target=self._handle_incoming_connection,
-                                    args=(connection,),
-                                    daemon=True,
-                                ).start()
-                            except socket.timeout:
-                                continue
+                    while not self._terminate:
+                        try:
+                            connection, _ = msg_lst_socket.accept()
+                            threading.Thread(
+                                target=self._handle_incoming_connection,
+                                args=(connection,),
+                                daemon=True,
+                            ).start()
+                        except socket.timeout:
+                            continue
 
                 case 1:
                     print(
