@@ -150,7 +150,6 @@ class Client:
 
     def _handle_get_file(self, recv_socket: socket.socket, local_filename: str):
         try:
-            recv_socket.listen()
             recv_socket.settimeout(self.TIMEOUT)
             conn, _ = recv_socket.accept()
             with open(local_filename, "wb") as f:
@@ -427,6 +426,7 @@ class Client:
         try:
             recv_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             recv_socket.bind(("", 0))
+            recv_socket.listen()
             my_port = recv_socket.getsockname()[1]
 
             # UDP no manda nada, pero el SO elige la interfaz de red correcta
@@ -440,8 +440,6 @@ class Client:
             finally:
                 temp_sock.close()
 
-            # arrancamos el receptor antes de mandar la petición;
-            # si lo hacemos al revés el otro cliente puede conectar antes de que estemos escuchando
             thread = threading.Thread(
                 target=self._handle_get_file, args=(recv_socket, local_filename)
             )
