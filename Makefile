@@ -81,6 +81,8 @@ export: clean
 	zip -r $(NAME) \
 	      ./report.pdf \
 	      ./Makefile \
+		  ./entrypoint.sh \
+		  ./Dockerfile \
 	      $(SRC_DIR) \
 	      $(LIBS_DIR) \
 	      $(TEST_DIR)
