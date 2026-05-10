@@ -13,7 +13,7 @@ RPC_LIB   = -ltirpc
 
 REPORT_DIR = ./report
 
-NAME = ejercicio_final.zip
+NAME = ejercicio_final_40_57.zip
 
 #############################################################
 # AUTHORS                                                   #
