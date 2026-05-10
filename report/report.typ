@@ -33,16 +33,11 @@
 )
 #show table.cell.where(y: 0): set text(weight: "bold")
 
-#align(center)[
-  #table(
-    columns: (2fr, 1fr, 2fr),
-    [Nombre], [NIA], [Correo],
-    [Jorge Adrian Saghin Dudulea], [100522257], [100522257\@alumnos.uc3m.es],
-    [Denis Loren Moldovan],        [100522240], [100522240\@alumnos.uc3m.es],
-  )
-]
-
-#v(0.5em)
+#show raw.where(block: true): block.with(
+  fill: luma(90%),
+  inset: 10pt,
+  radius: 4pt,
+)
 
 = Descripción del código
 
@@ -83,10 +78,9 @@ directamente. `handle_unregister` hace lo propio con `user_remove`. En caso de
 
 `handle_connect` registra al usuario en la base de datos con su IP y 
 el puerto de escucha que ha indicado. Lo interesante es que, después de 
-enviar la respuesta, cierra el file descriptor y espera 100 ms con 
-`usleep` *antes* de intentar entregar los mensajes pendientes. Este retardo 
-da tiempo al cliente a abrir su socket de escucha para no perder mensajes 
-que lleguen inmediatamente tras el CONNECT.
+enviar la respuesta, espera 100 ms con `usleep` *antes* de intentar entregar
+ los mensajes pendientes. Este retardo da tiempo al cliente a abrir su socket 
+ de escucha para no perder mensajes que lleguen inmediatamente tras el CONNECT.
 
 === DISCONNECT
 
@@ -149,13 +143,10 @@ sin contactar al servidor. El protocolo enviado es `SENDATTACH#emisor#receptor#m
 La transferencia de ficheros no pasa por el servidor; es directamente de 
 cliente a cliente. El proceso es el siguiente:
 
-+ El cliente solicitante busca en su caché interna (`_connected_users_info`) 
-la IP y el puerto del usuario que tiene el fichero. Si no lo encuentra, llama a USERS para actualizar la caché.
++ El cliente solicitante busca en su caché interna (`_connected_users_info`) la IP y el puerto del usuario que tiene el fichero. Si no lo encuentra, llama a USERS para actualizar la caché.
 + Crea un socket TCP en un puerto libre y arranca un hilo que quedará escuchando en ese puerto.
-+ Conecta directamente al socket de escucha del otro cliente y le envía el 
-mensaje `GETFILE#solicitante#fichero_remoto#mi_ip#mi_puerto`.
-+ El otro cliente, al recibir este mensaje en su hilo de escucha, abre el 
-fichero indicado y lo envía en bloques de 4096 bytes al socket del solicitante.
++ Conecta directamente al socket de escucha del otro cliente y le envía el mensaje `GETFILE#solicitante#fichero_remoto#mi_ip#mi_puerto`.
++ El otro cliente, al recibir este mensaje en su hilo de escucha, abre el fichero indicado y lo envía en bloques de 4096 bytes al socket del solicitante.
 + El hilo receptor va escribiendo los bloques en el fichero local hasta que la conexión se cierra.
 
 Para obtener la IP local correcta (la que el sistema operativo usaría 
@@ -221,10 +212,8 @@ para evitar que los warnings del código generado automáticamente rompan la com
 
 == Dependencias
 
-- GCC con soporte para C23
 - `libtirpc` y sus cabeceras (para ONC-RPC)
 - `libpthread`
-- Python 3 con Flask: `pip install flask` o `pip install -r src/ws/requirements.txt`
 - `rpcbind` en ejecución (necesario para el servidor RPC)
 
 == Compilación
@@ -237,6 +226,17 @@ El comando `make` compila el servidor de mensajería y el servidor RPC.
 Los binarios quedan en `./build/`. El código fuente de SQLite está en 
 `lib/sqlite/` y se compila por separado con flags más permisivas, ya 
 que no es código nuestro y genera warnings con `-Wall -Wextra`.
+
+=== Contenedor de Docker
+
+Debido a problemas con el firewall en Linux, y la definición del enunciado de que
+los clientes deben funcionar con IPs distintas, se ha escrito un pequeño
+Dockerfile para ejecutar los clientes, dentro de la misma máquina, sin
+utilizar como dirección el `localhost`.
+
+```bash
+docker build -t practica_final_distribuidos_40-57 .
+```
 
 == Ejecución
 
@@ -279,6 +279,22 @@ Los comandos disponibles en el cliente son:
   [`GETFILE <usuario> <remoto> <local>`], [Descargar un fichero de otro usuario],
   [`QUIT`],                            [Salir del cliente],
 )
+
+=== Ejecución de clientes con Docker
+
+Con la imagen de los clientes construida, al ejecutarlas, cada una con nombre distinto, 
+van a tener asignadas una dirección distinta, corriendo tanto el servicio web,
+como el cliente para ejecutar los comandos. Para ello:
+
+```bash
+docker run -it --rm --name cliente<n> -e SERVER_IP="<ip a>" -e SERVER_PORT="<puerto definido en el runtime del servidor>" practica_final_distribuidos_40-57
+```
+
+Y de fondo, para tener el servicio completo:
+
+```bash
+./build/server -p <puerto> && ./build/log_rpc_server
+```
 
 = Batería de pruebas
 
@@ -666,6 +682,12 @@ genera stubs con código C antiguo que produce bastantes warnings con
 flags para no romper el build. La documentación de `libtirpc` tampoco 
 es especialmente clara, y hubo que buscar ejemplos para entender cómo 
 inicializar el cliente correctamente.
+
+Por otro lado, dedicamos bastante tiempo a arreglar la comunicación entre
+diferentes clientes que no se estuviesen ejecutando en la misma máquina que el
+servidor. Finalmente optamos por probarlo con contenedores de Docker, y llegamos
+a la conclusión de que el problema era alguna regla de firewall, ya sea del router,
+o de las propias máquinas de Linux.
 
 En general la práctica nos ha parecido bastante completa para entender 
 cómo funciona un sistema distribuido real: concurrencia con threads, 

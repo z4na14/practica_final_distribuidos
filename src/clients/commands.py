@@ -10,9 +10,10 @@ class Client:
     TIMEOUT = 10
 
     def __init__(self, address: str, port: int):
-        self._server_address = address
-        self._server_main_port = port
-        self._server_ws_port = 3000
+        self._server_address = address # Direccion del servidor
+        self._server_main_port = port # Puerto del servidor
+        self._server_ws_address = "localhost" # Direccion del conversor de mensajes (En un principio local por simplicidad)
+        self._server_ws_port = 3000 # Puerto del conversor de mensajes
         self._client_port = None
         self._listening_thread = None
         self._terminate = False
@@ -44,9 +45,10 @@ class Client:
         return buf.decode("utf_8")
 
     def _listen_server(self, username: str):
-        msg_lst_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        msg_lst_socket.bind(("0.0.0.0", 0))
-        self._client_port = msg_lst_socket.getsockname()[1]
+        temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        temp_socket.bind(("", 0))  # puerto 0 = el SO elige uno libre
+        self._client_port = temp_socket.getsockname()[1]
+        temp_socket.close()
 
         server_socket = self._get_connection()
         self._send(server_socket, f"CONNECT#{username}#{self._client_port}")
@@ -60,19 +62,24 @@ class Client:
                     print("\rc> CONNECT OK", end="\nc> ")
                     self._connected_user = username
 
-                    msg_lst_socket.listen()
-                    msg_lst_socket.settimeout(self.TIMEOUT)
+                    with socket.socket(
+                        socket.AF_INET, socket.SOCK_STREAM
+                    ) as msg_lst_socket:
+                        msg_lst_socket.bind(("0.0.0.0", self._client_port))
+                        msg_lst_socket.listen()
+                        msg_lst_socket.settimeout(
+                            self.TIMEOUT
+                        )  # sin timeout accept() bloquea forever y nunca salimos del bucle
 
-                    while not self._terminate:
-                        try:
-                            connection, _ = msg_lst_socket.accept()
-                            threading.Thread(
-                                target=self._handle_incoming_connection,
-                                args=(connection,),
-                                daemon=True,
-                            ).start()
-                        except socket.timeout:
-                            continue
+                        while not self._terminate:
+                            try:
+                                connection, _ = msg_lst_socket.accept()
+                                msg = self._recv_str(connection)
+                                connection.close()
+                                if msg:
+                                    self._parse_incoming_message(msg)
+                            except socket.timeout:
+                                continue
 
                 case 1:
                     print(
@@ -94,15 +101,6 @@ class Client:
         self._terminate = False
         self._connected_user = None
         self._listening_thread = None
-
-    def _handle_incoming_connection(self, connection: socket.socket):
-        try:
-            msg = self._recv_str(connection)
-            connection.close()
-            if msg:
-                self._parse_incoming_message(msg)
-        except Exception:
-            return
 
     def _parse_incoming_message(self, message: str):
         parts = message.split("#", 3)
@@ -203,7 +201,7 @@ class Client:
     def _normalize_message(self, message: str) -> str:
         try:
             resp = requests.post(
-                f"http://{self._server_address}:{self._server_ws_port}/quitar-espacios",
+                f"http://{self._server_ws_address}:{self._server_ws_port}/quitar-espacios",
                 json={"cadena": message},
                 timeout=2,
             )
